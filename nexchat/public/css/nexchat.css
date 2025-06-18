@@ -1,0 +1,411 @@
+/* A modern floating chatbox */
+.nexchat-widget {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 350px;
+    max-height: 500px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 9999;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    transition: all 0.3s ease;
+}
+
+.nexchat-widget:hover {
+    box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+}
+
+.nexchat-header {
+    padding: 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    font-weight: 600;
+    font-size: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nexchat-close {
+    background: none;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: background-color 0.2s ease;
+}
+
+.nexchat-close:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.nexchat-body {
+    flex-grow: 1;
+    padding: 16px;
+    overflow-y: auto;
+    max-height: 350px;
+    background: #fafafa;
+}
+
+.nexchat-message {
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+}
+
+.nexchat-message.user {
+    align-items: flex-end;
+}
+
+.nexchat-message.bot {
+    align-items: flex-start;
+}
+
+.nexchat-message p {
+    margin: 0;
+    padding: 10px 14px;
+    border-radius: 18px;
+    max-width: 80%;
+    word-wrap: break-word;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.nexchat-message.user p {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-bottom-right-radius: 6px;
+}
+
+.nexchat-message.bot p {
+    background: white;
+    color: #333;
+    border: 1px solid #e1e5e9;
+    border-bottom-left-radius: 6px;
+}
+
+.nexchat-footer {
+    padding: 16px;
+    border-top: 1px solid #e1e5e9;
+    background: white;
+}
+
+.nexchat-input-container {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.nexchat-footer input {
+    flex: 1;
+    border: 1px solid #e1e5e9;
+    border-radius: 20px;
+    padding: 10px 16px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.nexchat-footer input:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.nexchat-send-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: white;
+    transition: transform 0.2s ease;
+}
+
+.nexchat-send-btn:hover {
+    transform: scale(1.05);
+}
+
+.nexchat-send-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.nexchat-toggle {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+    z-index: 9998;
+}
+
+.nexchat-toggle:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 25px rgba(102, 126, 234, 0.5);
+}
+
+.nexchat-widget.hidden {
+    display: none;
+}
+
+.nexchat-typing {
+    display: none;
+    padding: 10px 14px;
+    background: white;
+    border: 1px solid #e1e5e9;
+    border-radius: 18px;
+    border-bottom-left-radius: 6px;
+    max-width: 80%;
+    font-size: 14px;
+    color: #666;
+}
+
+.nexchat-typing.show {
+    display: block;
+}
+
+.nexchat-typing::after {
+    content: '...';
+    animation: typing 1.5s infinite;
+}
+
+@keyframes typing {
+    0%, 60%, 100% {
+        opacity: 1;
+    }
+    30% {
+        opacity: 0.5;
+    }
+}
+
+/* Role Selection Styling */
+.nexchat-message.role-selection {
+    max-width: 95%;
+}
+
+.role-selection-content {
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.role-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 32px;
+    margin: 2px 8px 2px 0;
+    padding: 4px 8px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
+.role-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+}
+
+.role-button:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(102, 126, 234, 0.3);
+}
+
+.role-selection-content code {
+    background: #f1f3f4;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 12px;
+    color: #333;
+}
+
+.role-selection-content strong {
+    font-weight: 600;
+    color: #333;
+}
+
+/* Role selection specific message styling */
+.nexchat-message.bot.role-selection p,
+.nexchat-message.bot.role-selection .role-selection-content {
+    background: #f8f9ff;
+    border: 1px solid #e1e5e9;
+    border-left: 4px solid #667eea;
+    padding: 16px;
+    border-radius: 12px;
+    border-bottom-left-radius: 6px;
+}
+
+/* Selection hints */
+.role-selection-content br {
+    line-height: 1.8;
+}
+
+/* Multi-select indicator */
+.role-button.selected {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
+}
+
+.role-button.selected:hover {
+    background: linear-gradient(135deg, #218838 0%, #1ea085 100%);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.4);
+}
+
+/* Role Action Buttons */
+.role-action-buttons {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #e1e5e9;
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.assign-all-button {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    border: none;
+    border-radius: 24px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 3px 12px rgba(40, 167, 69, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.assign-all-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+    background: linear-gradient(135deg, #218838 0%, #1ea085 100%);
+}
+
+.assign-all-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+}
+
+.cancel-button {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    border: none;
+    border-radius: 24px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 3px 12px rgba(220, 53, 69, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cancel-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
+}
+
+.cancel-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+}
+
+/* Button animations */
+.assign-all-button,
+.cancel-button {
+    position: relative;
+    overflow: hidden;
+}
+
+.assign-all-button::before,
+.cancel-button::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: width 0.6s, height 0.6s, top 0.6s, left 0.6s;
+    transform: translate(-50%, -50%);
+}
+
+.assign-all-button:active::before,
+.cancel-button:active::before {
+    width: 300px;
+    height: 300px;
+    top: 50%;
+    left: 50%;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .nexchat-widget {
+        width: calc(100vw - 40px);
+        right: 20px;
+        left: 20px;
+        bottom: 20px;
+    }
+    
+    .role-button {
+        min-width: 28px;
+        height: 28px;
+        margin: 1px 4px 1px 0;
+        font-size: 12px;
+    }
+    
+    .role-action-buttons {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .assign-all-button,
+    .cancel-button {
+        font-size: 13px;
+        padding: 10px 16px;
+    }
+} 
