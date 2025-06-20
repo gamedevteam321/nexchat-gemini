@@ -91,7 +91,7 @@ def process_message(message):
             json_response = get_intent_from_gemini(message, user)
             
             # Execute the task based on Gemini's understanding
-            response = execute_task(json_response, user)
+            response = execute_task(json_response, user, message)
 
         return {"response": response}
     
@@ -1395,9 +1395,10 @@ def handle_stock_selection_collection(message, state, user):
         numbered_options = state.get("numbered_options", [])
         user_input = message.strip()
         
-        # Debug: Log the function entry state  
+        # Debug: Log the function entry state (truncated to avoid "Value too big" error)
         try:
-            frappe.log_error(f"Function entry: missing_fields={missing_fields}, len={len(missing_fields) if missing_fields else 0}", "Function Entry Debug")
+            field_count = len(missing_fields) if missing_fields else 0
+            frappe.log_error(f"Function entry: field_count={field_count}", "Function Entry Debug")
         except:
             pass
         
@@ -1489,16 +1490,30 @@ def handle_stock_selection_collection(message, state, user):
         else:
             # Try to match the text directly (for non-numeric options)
             if numbered_options:
-                matching_options = [opt for opt in numbered_options if user_input.lower() in opt.lower()]
-                if len(matching_options) == 1:
-                    selected_value = matching_options[0]
-                elif len(matching_options) > 1:
-                    return f"Multiple options found matching '{user_input}'. Please be more specific or use numbers."
+                # First try exact match (case-insensitive)
+                exact_matches = [opt for opt in numbered_options if opt.lower() == user_input.lower()]
+                if len(exact_matches) == 1:
+                    selected_value = exact_matches[0]
+                elif len(exact_matches) > 1:
+                    selected_value = exact_matches[0]  # Take first exact match
                 else:
-                    return f"Option '{user_input}' not found. Please use numbers (e.g., 1, 2, 3) or exact option names."
+                    # Then try partial match
+                    matching_options = [opt for opt in numbered_options if user_input.lower() in opt.lower()]
+                    if len(matching_options) == 1:
+                        selected_value = matching_options[0]
+                    elif len(matching_options) > 1:
+                        return f"Multiple options found matching '{user_input}'. Please be more specific or use numbers."
+                    else:
+                        return f"Option '{user_input}' not found. Please use numbers (e.g., 1, 2, 3) or exact option names."
             else:
                 # If no numbered options, treat as direct input
                 selected_value = user_input
+        
+        # Get current doctype from state early - needed for Payment Entry logic
+        current_doctype = state.get("doctype")
+        
+        # Define remaining_fields early so it can be used in Payment Entry logic
+        remaining_fields = missing_fields.copy()
         
         # Add the selected value to data
         selection_type = state.get("selection_type")
@@ -1516,6 +1531,30 @@ def handle_stock_selection_collection(message, state, user):
                         return f"Could not create location '{selected_value}': {str(e)}. Please use an existing location."
             
             data[selection_type] = selected_value
+            
+            # CRITICAL FIX: Handle Payment Entry party_type auto-setting
+            if selection_type == "payment_type" and current_doctype == "Payment Entry":
+                # Auto-set party_type based on payment_type
+                if selected_value == "Receive":
+                    data["party_type"] = "Customer"
+                    # Remove party_type from remaining fields since we just set it
+                    if "party_type" in remaining_fields:
+                        remaining_fields.remove("party_type")
+                elif selected_value == "Pay":
+                    data["party_type"] = "Supplier"
+                    # Remove party_type from remaining fields since we just set it
+                    if "party_type" in remaining_fields:
+                        remaining_fields.remove("party_type")
+                elif selected_value == "Internal Transfer":
+                    # For Internal Transfer, party is not required
+                    if "party_type" in remaining_fields:
+                        remaining_fields.remove("party_type")
+                    if "party" in remaining_fields:
+                        remaining_fields.remove("party")
+                try:
+                    frappe.log_error(f"Auto-set party_type for Payment Entry: {data.get('party_type')}", "Payment Entry Auto-Set")
+                except:
+                    pass
             
             # CRITICAL FIX: Detect doctype immediately after naming_series selection
             if selection_type == "naming_series":
@@ -1546,10 +1585,7 @@ def handle_stock_selection_collection(message, state, user):
             current_field = missing_fields[0]
             data[current_field] = selected_value
         
-        # Remove this field from missing fields - handle special cases
-        remaining_fields = missing_fields.copy()
-        
-        # Remove the field we just populated
+        # Remove the field we just populated from remaining_fields
         if selection_type and selection_type in remaining_fields:
             remaining_fields.remove(selection_type)
         elif missing_fields:
@@ -1560,9 +1596,6 @@ def handle_stock_selection_collection(message, state, user):
             remaining_fields.remove("s_warehouse")
         elif selection_type == "to_warehouse" and "t_warehouse" in remaining_fields:
             remaining_fields.remove("t_warehouse")
-        
-        # Get current doctype from state - CRITICAL: This must be preserved!
-        current_doctype = state.get("doctype")
         
         # Debug: Log the doctype from state (data truncated to avoid char limit)
         try:
@@ -1743,29 +1776,29 @@ def handle_stock_selection_collection(message, state, user):
                             current_doctype = "Purchase Invoice"
                         else:
                             current_doctype = "Purchase Order"
-                    elif "customer" in data:
-                        # Could be Sales Order, Sales Invoice, or Quotation
-                        if any(field in data for field in ["due_date", "posting_date"]) and "delivery_date" not in data:
-                            current_doctype = "Sales Invoice"
-                        elif "valid_till" in data:
-                            current_doctype = "Quotation"
-                        else:
-                            current_doctype = "Sales Order"
-                    elif "employee_name" in data or "first_name" in data:
-                        current_doctype = "Employee"
-                    elif "customer_name" in data:
-                        current_doctype = "Customer"
-                    elif "supplier_name" in data:
-                        current_doctype = "Supplier"
-                    elif "item_name" in data and not any(field in data for field in ["location", "gross_purchase_amount"]):
-                        current_doctype = "Item"
-                    elif "item_code" in data and any(field in data for field in ["location", "gross_purchase_amount"]):
-                        current_doctype = "Asset"
-                    elif "stock_entry_type" in data or "purpose" in data or any(field in data for field in ["from_warehouse", "to_warehouse", "s_warehouse", "t_warehouse"]):
-                        current_doctype = "Stock Entry"
+                elif "customer" in data:
+                    # Could be Sales Order, Sales Invoice, or Quotation
+                    if any(field in data for field in ["due_date", "posting_date"]) and "delivery_date" not in data:
+                        current_doctype = "Sales Invoice"
+                    elif "valid_till" in data:
+                        current_doctype = "Quotation"
                     else:
-                        # Final fallback
-                        current_doctype = "Stock Entry"
+                        current_doctype = "Sales Order"
+                elif "employee_name" in data or "first_name" in data:
+                    current_doctype = "Employee"
+                elif "customer_name" in data:
+                    current_doctype = "Customer"
+                elif "supplier_name" in data:
+                    current_doctype = "Supplier"
+                elif "item_name" in data and not any(field in data for field in ["location", "gross_purchase_amount"]):
+                    current_doctype = "Item"
+                elif "item_code" in data and any(field in data for field in ["location", "gross_purchase_amount"]):
+                    current_doctype = "Asset"
+                elif "stock_entry_type" in data or "purpose" in data or any(field in data for field in ["from_warehouse", "to_warehouse", "s_warehouse", "t_warehouse"]):
+                    current_doctype = "Stock Entry"
+                else:
+                    # Final fallback
+                    current_doctype = "Stock Entry"
             
             # ULTIMATE FAILSAFE: Force correct doctype detection if it's still wrong
             if current_doctype == "Stock Entry" and data.get("naming_series"):
@@ -1890,6 +1923,7 @@ Analyze the user's request and provide a JSON object with 'doctype', 'action', a
 
 Supported actions:
 - "create": Create a new document
+- "create_doctype": Create a new DocType definition
 - "list": Show/list documents  
 - "get": Get specific document information
 - "update": Update existing document fields
@@ -1917,12 +1951,28 @@ CRITICAL CREATE WITH RELATIONSHIP PATTERNS:
 - "Create X as child of Y" -> create X with parent_item_group = Y
 - "New X under Y" -> create X with parent_item_group = Y
 
+CRITICAL DOCTYPE CREATION PATTERNS (HIGHEST PRIORITY):
+- "create a doctype" -> action: "create_doctype"
+- "create new doctype" -> action: "create_doctype"
+- "make a doctype" -> action: "create_doctype"
+- "create doctype using module X" -> action: "create_doctype" with module
+- "new doctype for module X" -> action: "create_doctype" with module
+- "create a doctype suing module" -> action: "create_doctype" (handle typos)
+
+VERY IMPORTANT: If you see "doctype" in the request, it's likely asking to create a DocType definition, NOT a document instance. Always use action: "create_doctype" for these requests.
+
 Examples:
 - "Create a new customer" -> {{"doctype": "Customer", "action": "create", "data": {{}}}}
 - "Create item with name Widget" -> {{"doctype": "Item", "action": "create", "data": {{"item_name": "Widget"}}}}
 - "Add a biomass item group child of raw material" -> {{"doctype": "Item Group", "action": "create", "data": {{"item_group_name": "Biomass", "parent_item_group": "Raw Material"}}}}
 - "Create finished goods under products" -> {{"doctype": "Item Group", "action": "create", "data": {{"item_group_name": "Finished Goods", "parent_item_group": "Products"}}}}
 - "Add electronics item group child of products" -> {{"doctype": "Item Group", "action": "create", "data": {{"item_group_name": "Electronics", "parent_item_group": "Products"}}}}
+- "create a doctype using module franchise onboarding" -> {{"action": "create_doctype", "module": "Franchise Onboarding"}}
+- "create a doctype suing module franchise onboarding" -> {{"action": "create_doctype", "module": "Franchise Onboarding"}}
+- "create a new doctype" -> {{"action": "create_doctype"}}
+- "make a new doctype called Employee Skill" -> {{"action": "create_doctype", "doctype_name": "Employee Skill"}}
+- "create doctype for CRM module" -> {{"action": "create_doctype", "module": "CRM"}}
+- "new doctype" -> {{"action": "create_doctype"}}
 - "Show me all customers" -> {{"doctype": "Customer", "action": "list", "filters": {{}}}}
 - "List items where item_group is Raw Material" -> {{"doctype": "Item", "action": "list", "filters": {{"item_group": "Raw Material"}}}}
 - "Get customer CUST-001" -> {{"doctype": "Customer", "action": "get", "filters": {{"name": "CUST-001"}}}}
@@ -2016,7 +2066,7 @@ def get_user_accessible_doctypes():
                 "Sales Invoice", "Purchase Invoice", "Lead", "Opportunity",
                 "Quotation", "User", "Contact", "Address", "Task", "Project"]
 
-def execute_task(task_json, user):
+def execute_task(task_json, user, user_input=""):
     """Execute the task based on the parsed JSON from Gemini"""
     
     action = task_json.get("action")
@@ -2049,7 +2099,8 @@ def execute_task(task_json, user):
     # CRITICAL DEBUG: Log what Gemini detected (truncated to avoid char limit)
     try:
         json_summary = f"{len(task_json)} keys" if task_json else "empty"
-        frappe.log_error(f"Gemini - Action: {action}, Doctype: {doctype}, JSON: {json_summary}", "Gemini Debug")
+        full_json = str(task_json)[:200] + "..." if len(str(task_json)) > 200 else str(task_json)
+        frappe.log_error(f"Gemini - Action: {action}, Doctype: {doctype}, JSON: {json_summary}, Full: {full_json}", "Gemini Debug")
     except:
         pass
     
@@ -2066,6 +2117,11 @@ def execute_task(task_json, user):
         return task_json["reply"]
     
     if not action or not doctype:
+        # Check for doctype creation patterns as fallback
+        user_input_lower = user_input.lower()
+        if any(pattern in user_input_lower for pattern in ['create doctype', 'create a doctype', 'new doctype', 'make doctype']):
+            return handle_create_doctype_action(task_json, user, user_input)
+        
         return "I'm not sure what you'd like me to do. Could you please be more specific? For example, try saying 'Create a new customer' or 'Show me my sales orders'."
 
     # Check permissions
@@ -2077,6 +2133,9 @@ def execute_task(task_json, user):
         if not frappe.has_permission(doctype, "create"):
             return f"❌ You don't have permission to create {doctype} documents."
         return handle_create_action(doctype, task_json, user)
+    
+    elif action == "create_doctype":
+        return handle_create_doctype_action(task_json, user, user_input)
     
     elif action == "list":
         if not frappe.has_permission(doctype, "read"):
@@ -2107,17 +2166,234 @@ def execute_task(task_json, user):
     else:
         return f"I understand you want to work with {doctype}. I can help you:\n• **Create** new {doctype}\n• **List/View** {doctype} documents\n• **Get** specific {doctype} details\n• **Update** {doctype} fields\n• **Delete** {doctype} documents\n• **Assign** roles or links\n\nWhat would you like to do?"
 
+def handle_create_doctype_action(task_json, user, user_input=""):
+    """Handle DocType creation requests"""
+    try:
+        # Check if user has permission to create DocTypes
+        if not frappe.has_permission("DocType", "create"):
+            return "❌ You don't have permission to create DocTypes. This requires System Manager or Developer role."
+        
+        module = task_json.get("module", "")
+        doctype_name = task_json.get("doctype_name", "")
+        
+        # Try to extract module from user input if not provided by Gemini
+        if not module and user_input:
+            user_input_lower = user_input.lower()
+            if "franchise onboarding" in user_input_lower:
+                module = "Franchise Onboarding"
+            elif "module" in user_input_lower:
+                # Try to extract module name after "module" keyword
+                import re
+                module_match = re.search(r'module\s+([a-zA-Z\s]+)', user_input_lower)
+                if module_match:
+                    potential_module = module_match.group(1).strip().title()
+                    # Check if it's a valid module
+                    available_modules = frappe.get_all("Module Def", fields=["name"])
+                    module_names = [m.name for m in available_modules]
+                    if potential_module in module_names:
+                        module = potential_module
+        
+        # Create beautiful HTML response for DocType creation guide
+        response_html = f"""
+<div class="nexchat-field-container">
+    <div class="nexchat-field-header">
+        <span class="nexchat-field-icon">🏗️</span>
+        <h4 class="nexchat-field-title">DocType Creation Guide</h4>
+        <span class="nexchat-field-type">Development</span>
+    </div>
+    
+    <div class="nexchat-help-section">
+        <div class="nexchat-help-title">📋 Overview</div>
+        <p>Creating a DocType involves defining fields, permissions, and business logic. Follow these steps to create your custom DocType.</p>
+    </div>
+    
+    {f'''
+    <div class="nexchat-options-header">
+        <span class="nexchat-options-title">🎯 Target Module</span>
+        <span class="nexchat-options-count">{module}</span>
+    </div>
+    ''' if module else ''}
+    
+    {f'''
+    <div class="nexchat-options-header">
+        <span class="nexchat-options-title">📝 DocType Name</span>
+        <span class="nexchat-options-count">{doctype_name}</span>
+    </div>
+    ''' if doctype_name else ''}
+    
+    <div class="nexchat-help-section">
+        <div class="nexchat-help-title">📋 Step-by-Step Instructions</div>
+        
+        <div class="nexchat-step-container">
+            <div class="nexchat-step-number">1</div>
+            <div class="nexchat-step-content">
+                <h5 class="nexchat-step-title">Access DocType Creator</h5>
+                <ul class="nexchat-help-list">
+                    <li>Go to <strong>Developer</strong> → <strong>DocType</strong> → <strong>New</strong></li>
+                    <li>Or use the search bar and type 'DocType'</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="nexchat-step-container">
+            <div class="nexchat-step-number">2</div>
+            <div class="nexchat-step-content">
+                <h5 class="nexchat-step-title">Basic Configuration</h5>
+                <ul class="nexchat-help-list">
+                    <li><strong>Name:</strong> {doctype_name or 'YourDocTypeName'}</li>
+                    <li><strong>Module:</strong> {module or 'Select appropriate module'}</li>
+                    <li><strong>Description:</strong> Brief description of what this DocType represents</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="nexchat-step-container">
+            <div class="nexchat-step-number">3</div>
+            <div class="nexchat-step-content">
+                <h5 class="nexchat-step-title">Add Fields</h5>
+                <ul class="nexchat-help-list">
+                    <li>Click <strong>Add Row</strong> in the Fields table</li>
+                    <li>Configure field properties:</li>
+                </ul>
+                <div class="nexchat-sub-list">
+                    <div class="nexchat-sub-item"><strong>Label:</strong> Display name for the field</div>
+                    <div class="nexchat-sub-item"><strong>Type:</strong> Data, Link, Select, Date, etc.</div>
+                    <div class="nexchat-sub-item"><strong>Field Name:</strong> Auto-generated or custom</div>
+                    <div class="nexchat-sub-item"><strong>Options:</strong> For Link/Select fields</div>
+                    <div class="nexchat-sub-item"><strong>Mandatory:</strong> Check if required</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="nexchat-step-container">
+            <div class="nexchat-step-number">4</div>
+            <div class="nexchat-step-content">
+                <h5 class="nexchat-step-title">Configure Permissions</h5>
+                <ul class="nexchat-help-list">
+                    <li>Go to <strong>Permissions</strong> section</li>
+                    <li>Add roles that can access this DocType</li>
+                    <li>Set Read, Write, Create, Delete permissions</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="nexchat-step-container">
+            <div class="nexchat-step-number">5</div>
+            <div class="nexchat-step-content">
+                <h5 class="nexchat-step-title">Advanced Settings</h5>
+                <ul class="nexchat-help-list">
+                    <li><strong>Naming:</strong> Auto-generated, field-based, or custom</li>
+                    <li><strong>Track Changes:</strong> Enable document versioning</li>
+                    <li><strong>Search Fields:</strong> Fields to search by</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="nexchat-step-container">
+            <div class="nexchat-step-number">6</div>
+            <div class="nexchat-step-content">
+                <h5 class="nexchat-step-title">Save and Test</h5>
+                <ul class="nexchat-help-list">
+                    <li>Click <strong>Save</strong> to create the DocType</li>
+                    <li>Test by creating a new document</li>
+                    <li>Modify fields and permissions as needed</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <div class="nexchat-help-section">
+        <div class="nexchat-help-title">💡 Pro Tips</div>
+        <ul class="nexchat-help-list">
+            <li>Start with basic fields and add complexity later</li>
+            <li>Use consistent naming conventions</li>
+            <li>Test permissions with different user roles</li>
+            <li>Consider workflow requirements early</li>
+        </ul>
+    </div>
+    
+    {f'''
+    <div class="nexchat-help-section">
+        <div class="nexchat-help-title">💻 Alternative - Command Line</div>
+        <div class="nexchat-examples-grid">
+            <div class="nexchat-example-item">bench new-doctype --app your_app_name --module '{module}' {doctype_name or 'YourDocType'}</div>
+        </div>
+    </div>
+    ''' if module else ''}
+</div>
+
+<style>
+.nexchat-step-container {{
+    display: flex;
+    margin: 12px 0;
+    padding: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+}}
+
+.nexchat-step-number {{
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    background: #3b82f6;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+    margin-right: 16px;
+}}
+
+.nexchat-step-content {{
+    flex: 1;
+}}
+
+.nexchat-step-title {{
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2937;
+}}
+
+.nexchat-sub-list {{
+    margin-left: 20px;
+    margin-top: 8px;
+}}
+
+.nexchat-sub-item {{
+    padding: 4px 0;
+    color: #6b7280;
+    border-left: 2px solid #e5e7eb;
+    padding-left: 12px;
+    margin: 4px 0;
+}}
+</style>
+"""
+        
+        return response_html
+        
+    except Exception as e:
+        return f"Error processing DocType creation request: {str(e)}"
+
 def handle_create_action(doctype, task_json, user):
     """Handle document creation"""
     try:
         # CRITICAL FIX: Ensure doctype is properly preserved from the start
+        # Get data first as it's needed for conditional field checks
+        data = task_json.get("data", {})
             
         # Get required fields for the doctype
         meta = frappe.get_meta(doctype)
         required_fields = []
         
+        # Get base required fields from metadata
         for df in meta.fields:
-            if df.reqd and not df.hidden and not df.read_only and not df.default:
+            is_required = df.reqd and not df.hidden and not df.read_only and not df.default
+            
+            if is_required:
                 # Skip standard fields that are auto-populated
                 if df.fieldname not in ['name', 'owner', 'creation', 'modified', 'modified_by', 'docstatus']:
                     # For Stock Entry, skip series as it's auto-generated
@@ -2127,14 +2403,41 @@ def handle_create_action(doctype, task_json, user):
                     if df.fieldtype == "Table":
                         continue
                     required_fields.append(df.fieldname)
-
-        data = task_json.get("data", {})
+        
+        # Add hardcoded required fields for specific doctypes
+        if doctype == "Payment Entry":
+            # These fields are required by business logic even if not marked reqd=1
+            # Always add party_type and party - we'll filter out later for Internal Transfer
+            if "party_type" not in required_fields:
+                required_fields.append("party_type")
+            if "party" not in required_fields:
+                required_fields.append("party")
+            
+            # Filter out fields that are often auto-calculated or conditional
+            # These fields are typically auto-calculated or only needed in specific scenarios
+            fields_to_exclude = [
+                "target_exchange_rate",  # Only needed for multi-currency
+                "difference_amount",  # Auto-calculated
+                "total_allocated_amount",  # Auto-calculated
+                "unallocated_amount",  # Auto-calculated
+                "base_paid_amount",  # Auto-calculated
+                "base_received_amount",  # Auto-calculated
+                "base_total_allocated_amount",  # Auto-calculated
+                "base_unallocated_amount"  # Auto-calculated
+            ]
+            # Don't filter out received_amount yet - we'll auto-set it during field collection
+            for field_to_exclude in fields_to_exclude:
+                if field_to_exclude in required_fields:
+                    required_fields.remove(field_to_exclude)
+        
+        # Remove duplicates while preserving order
+        required_fields = list(dict.fromkeys(required_fields))
         missing_fields = []
         
         for field in required_fields:
             field_obj = meta.get_field(field)
             if field not in data:
-                if field_obj.default:
+                if field_obj and field_obj.default:
                     # Set the default value in data instead of adding to missing_fields
                     if field_obj.default == "Today":
                         from datetime import date
@@ -2142,7 +2445,50 @@ def handle_create_action(doctype, task_json, user):
                     else:
                         data[field] = field_obj.default
                 else:
-                    missing_fields.append(field)
+                    # Handle smart defaults for specific doctypes
+                    default_value = None
+                    if doctype == "Payment Entry":
+                        if field == "party_type":
+                            # Auto-set party type based on payment type (if available)
+                            if data.get("payment_type") == "Receive":
+                                default_value = "Customer"
+                            elif data.get("payment_type") == "Pay":
+                                default_value = "Supplier"
+                            elif data.get("payment_type") == "Internal Transfer":
+                                # For Internal Transfer, we don't need party_type or party
+                                continue  # Skip adding to missing_fields
+                        elif field == "party" and data.get("payment_type") == "Internal Transfer":
+                            # For Internal Transfer, we don't need party
+                            continue  # Skip adding to missing_fields
+                        elif field == "received_amount":
+                            # Auto-set received_amount to paid_amount for same currency transactions
+                            paid_amount = data.get("paid_amount")
+                            source_rate = data.get("source_exchange_rate", 1)
+                            if paid_amount:
+                                if source_rate in [0, 0.0, 1, 1.0]:
+                                    # Same currency or no conversion needed
+                                    default_value = paid_amount
+                                else:
+                                    # Different currency - calculate received amount
+                                    default_value = float(paid_amount) * float(source_rate)
+                            else:
+                                # If no paid_amount yet, we'll collect this field later
+                                missing_fields.append(field)
+                                continue
+                        elif field == "target_exchange_rate":
+                            # Auto-set target exchange rate
+                            source_rate = data.get("source_exchange_rate", 1)
+                            if source_rate in [0, 0.0, 1, 1.0]:
+                                # Same currency
+                                default_value = 1.0
+                            else:
+                                # For different currencies, default to 1 as well unless specified
+                                default_value = 1.0
+                    
+                    if default_value:
+                        data[field] = default_value
+                    else:
+                        missing_fields.append(field)
         
         # Get required child tables for the doctype
         required_child_tables = get_required_child_tables(doctype)
@@ -2297,6 +2643,24 @@ def create_document(doctype, data, user):
                             clear_conversation_state(user)
                             return f"Could not find {link_doctype}: '{field_value}'. Please check the name and try again."
             
+            # Special handling for Payment Entry before updating fields
+            if doctype == "Payment Entry":
+                # Auto-set received_amount if not provided but paid_amount exists
+                if "received_amount" not in regular_data and "paid_amount" in regular_data:
+                    paid_amount = regular_data.get("paid_amount", 0)
+                    source_rate = regular_data.get("source_exchange_rate", 1)
+                    
+                    if source_rate in [0, 0.0, 1, 1.0]:
+                        # Same currency or no conversion
+                        regular_data["received_amount"] = paid_amount
+                    else:
+                        # Currency conversion
+                        regular_data["received_amount"] = float(paid_amount) * float(source_rate)
+                
+                # Auto-set target_exchange_rate if not provided
+                if "target_exchange_rate" not in regular_data:
+                    regular_data["target_exchange_rate"] = 1.0
+            
             # Update regular fields first
             doc.update(regular_data)
             
@@ -2446,8 +2810,8 @@ def handle_update_action(doctype, task_json, user):
                         return f"Multiple {doctype} documents found matching '{search_name}': {match_list}. Please be more specific."
             
             # Final check after fuzzy matching
-            if not frappe.db.exists(doctype, filters):
-                return f"Could not find a {doctype} document matching your criteria."
+        if not frappe.db.exists(doctype, filters):
+            return f"Could not find a {doctype} document matching your criteria."
         
         # Get the document to show available fields if needed
         doc = frappe.get_doc(doctype, filters)
@@ -2535,6 +2899,7 @@ def handle_update_action(doctype, task_json, user):
                                 frappe.log_error(f"Link partial matched '{value}' to '{matched_name}'", "Link Partial Match")
                             elif len(partial_matches) > 1:
                                 match_list = ", ".join(partial_matches[:5])
+                                clear_conversation_state(user)
                                 return f"Multiple {link_doctype} found matching '{value}': {match_list}. Please be more specific."
                         
                         if matched_name:
@@ -4559,6 +4924,25 @@ def get_smart_field_selection(field_name, field_obj, data, missing_fields, user,
                 return show_location_selection(data, missing_fields, user)
             else:
                 return show_generic_link_selection(field_name, field_label, link_doctype, data, missing_fields, user, current_doctype)
+        
+        elif fieldtype == "Dynamic Link":
+            # Handle Dynamic Link fields (like Payment Entry party field)
+            # Dynamic Link uses another field to determine target doctype
+            if current_doctype == "Payment Entry" and field_name == "party":
+                # Use party_type to determine which doctype to show
+                party_type = data.get("party_type")
+                if party_type == "Customer":
+                    return show_generic_link_selection(field_name, field_label, "Customer", data, missing_fields, user, current_doctype)
+                elif party_type == "Supplier":
+                    return show_generic_link_selection(field_name, field_label, "Supplier", data, missing_fields, user, current_doctype)
+                elif party_type == "Employee":
+                    return show_generic_link_selection(field_name, field_label, "Employee", data, missing_fields, user, current_doctype)
+                else:
+                    # Fallback if party_type not set - shouldn't happen with auto-setting
+                    return show_generic_text_input(field_name, field_label, data, missing_fields, user, current_doctype)
+            else:
+                # Generic Dynamic Link handling - fallback to text input
+                return show_generic_text_input(field_name, field_label, data, missing_fields, user, current_doctype)
         
         elif fieldtype == "Select":
             options = field_obj.options or ""
