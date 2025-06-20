@@ -110,6 +110,7 @@ class NexchatWidget {
 
     destroy() {
         // Clean up event listeners and DOM elements
+        $(document).off('keydown.nexchat-nav');
         $('.nexchat-widget, .nexchat-toggle').remove();
         window.nexchat = null;
     }
@@ -131,27 +132,35 @@ class NexchatWidget {
     addMessage(text, sender, animate = true) {
         const messageClass = sender === 'user' ? 'user' : 'bot';
         
-        // Check if this is a role selection message
+        // Check message type for special formatting
         const isRoleSelection = text.includes('Select Role(s) for') && text.includes('`');
+        const isHTMLResponse = text.includes('<div class="nexchat-') || text.includes('<div class="nexchat-options-container">') || text.includes('<div class="nexchat-field-container">');
         
         let messageContent;
         if (isRoleSelection && sender === 'bot') {
             messageContent = this.formatRoleSelectionMessage(text);
+        } else if (isHTMLResponse && sender === 'bot') {
+            // Use HTML response directly
+            messageContent = text;
         } else {
             messageContent = `<p>${this.escapeHtml(text)}</p>`;
         }
         
         const message = $(`
-            <div class="nexchat-message ${messageClass} ${isRoleSelection ? 'role-selection' : ''}" style="${animate ? 'opacity: 0; transform: translateY(10px);' : ''}">
+            <div class="nexchat-message ${messageClass} ${isRoleSelection ? 'role-selection' : ''} ${isHTMLResponse ? 'html-response' : ''}" style="${animate ? 'opacity: 0; transform: translateY(10px);' : ''}">
                 ${messageContent}
             </div>
         `);
 
         $('#nexchat-body').append(message);
 
-        // Add click handlers for role buttons
+        // Add click handlers for interactive elements
         if (isRoleSelection) {
             this.addRoleButtonHandlers();
+        }
+        
+        if (isHTMLResponse) {
+            this.addOptionHandlers();
         }
 
         if (animate) {
@@ -229,6 +238,128 @@ class NexchatWidget {
         
         // Automatically send the message
         this.handleUserInput();
+    }
+
+    addOptionHandlers() {
+        // Handle option selection clicks
+        $('.nexchat-option-item').off('click').on('click', function(e) {
+            e.preventDefault();
+            const value = $(this).data('value') || $(this).find('.nexchat-option-primary').text().trim();
+            window.nexchat.selectOption(value);
+        });
+
+        // Handle collapsible section toggles
+        $('.nexchat-collapsible-header').off('click').on('click', function(e) {
+            e.preventDefault();
+            window.nexchat.toggleCollapsible(this);
+        });
+
+        // Handle search input
+        $('.nexchat-search-input').off('input').on('input', function(e) {
+            window.nexchat.filterOptions($(this).val());
+        });
+
+        // Add keyboard navigation
+        this.addKeyboardNavigation();
+    }
+
+    selectOption(value) {
+        // Handle special pagination commands
+        if (value === 'next_page' || value === 'prev_page') {
+            value = value.replace('_', ' '); // Convert to 'next page' or 'prev page'
+        }
+        
+        // Auto-fill the input with the selected value
+        const input = $('#nexchat-input');
+        input.val(value);
+        input.focus();
+        
+        // Optionally auto-submit for better UX
+        setTimeout(() => {
+            this.handleUserInput();
+        }, 100);
+    }
+
+    toggleCollapsible(header) {
+        const section = $(header).closest('.nexchat-collapsible-section');
+        section.toggleClass('expanded');
+        
+        // Update icon rotation
+        const icon = section.find('.nexchat-collapsible-icon');
+        if (section.hasClass('expanded')) {
+            icon.css('transform', 'rotate(180deg)');
+        } else {
+            icon.css('transform', 'rotate(0deg)');
+        }
+    }
+
+    filterOptions(searchValue) {
+        const searchLower = searchValue.toLowerCase();
+        $('.nexchat-option-item').each(function() {
+            const primaryText = $(this).find('.nexchat-option-primary').text().toLowerCase();
+            const secondaryText = $(this).find('.nexchat-option-secondary').text().toLowerCase();
+            
+            if (primaryText.includes(searchLower) || secondaryText.includes(searchLower)) {
+                $(this).show();
+            } else {
+                $(this).hide();
+            }
+        });
+
+        // Auto-expand collapsible sections when searching
+        if (searchValue.trim()) {
+            $('.nexchat-collapsible-section').addClass('expanded');
+        }
+    }
+
+    addKeyboardNavigation() {
+        // Remove existing handlers to prevent duplicates
+        $(document).off('keydown.nexchat-nav');
+        
+        $(document).on('keydown.nexchat-nav', (e) => {
+            // Only handle if chat widget is open and there are visible options
+            if (!this.isOpen) return;
+            
+            const visibleOptions = $('.nexchat-option-item:visible');
+            if (visibleOptions.length === 0) return;
+            
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                
+                const currentFocus = $('.nexchat-option-item.focused');
+                let currentIndex = currentFocus.length ? visibleOptions.index(currentFocus) : -1;
+                
+                // Remove current focus
+                currentFocus.removeClass('focused');
+                
+                // Calculate new index
+                if (e.key === 'ArrowDown') {
+                    currentIndex = (currentIndex + 1) % visibleOptions.length;
+                } else {
+                    currentIndex = currentIndex <= 0 ? visibleOptions.length - 1 : currentIndex - 1;
+                }
+                
+                // Add focus to new option
+                const newFocused = visibleOptions.eq(currentIndex);
+                newFocused.addClass('focused');
+                
+                // Scroll into view
+                newFocused[0].scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'nearest' 
+                });
+                
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const focusedOption = $('.nexchat-option-item.focused');
+                if (focusedOption.length) {
+                    focusedOption.click();
+                }
+            } else if (e.key === 'Escape') {
+                // Clear focus on escape
+                $('.nexchat-option-item.focused').removeClass('focused');
+            }
+        });
     }
 
     showTyping() {

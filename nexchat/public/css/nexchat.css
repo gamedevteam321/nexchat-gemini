@@ -97,6 +97,25 @@
     border-bottom-left-radius: 6px;
 }
 
+/* HTML Response messages styling */
+.nexchat-message.html-response {
+    max-width: 95%;
+}
+
+.nexchat-message.html-response .nexchat-field-container,
+.nexchat-message.html-response .nexchat-options-container {
+    margin: 0;
+    border-radius: 18px;
+    border-bottom-left-radius: 6px;
+}
+
+/* Override padding for HTML messages */
+.nexchat-message.html-response > div:first-child {
+    padding: 0;
+    background: none;
+    border: none;
+}
+
 .nexchat-footer {
     padding: 16px;
     border-top: 1px solid #e1e5e9;
@@ -382,7 +401,469 @@
     left: 50%;
 }
 
-/* Responsive adjustments */
+/* Enhanced Option Selection Styling */
+.nexchat-options-container {
+    background: #f8f9ff;
+    border: 1px solid #e1e5e9;
+    border-left: 4px solid #667eea;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px 0;
+    max-width: 100%;
+}
+
+.nexchat-options-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e1e5e9;
+}
+
+.nexchat-options-title {
+    font-weight: 600;
+    color: #333;
+    font-size: 15px;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nexchat-options-count {
+    background: #667eea;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.nexchat-options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.nexchat-option-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: white;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+    min-height: 44px;
+}
+
+.nexchat-option-item:hover,
+.nexchat-option-item.focused {
+    border-color: #667eea;
+    background: #f0f2ff;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+
+.nexchat-option-item.focused {
+    border-color: #5a67d8;
+    background: #e6f3ff;
+}
+
+.nexchat-option-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.nexchat-option-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.nexchat-option-primary {
+    font-weight: 500;
+    color: #333;
+    line-height: 1.3;
+}
+
+.nexchat-option-secondary {
+    font-size: 12px;
+    color: #666;
+    line-height: 1.2;
+}
+
+/* Compact grid for many options */
+.nexchat-options-grid.compact {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 6px;
+}
+
+.nexchat-options-grid.compact .nexchat-option-item {
+    padding: 8px 10px;
+    min-height: 36px;
+    font-size: 13px;
+}
+
+.nexchat-options-grid.compact .nexchat-option-badge {
+    min-width: 20px;
+    height: 20px;
+    font-size: 11px;
+}
+
+/* Collapsible sections for large lists */
+.nexchat-collapsible-section {
+    margin: 8px 0;
+}
+
+.nexchat-collapsible-header {
+    background: #f1f3f5;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    color: #333;
+}
+
+.nexchat-collapsible-header:hover {
+    background: #e9ecef;
+    border-color: #667eea;
+}
+
+.nexchat-collapsible-icon {
+    transition: transform 0.2s ease;
+    font-size: 16px;
+    color: #667eea;
+}
+
+.nexchat-collapsible-section.expanded .nexchat-collapsible-icon {
+    transform: rotate(180deg);
+}
+
+.nexchat-collapsible-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    background: white;
+    border: 1px solid #e1e5e9;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+}
+
+.nexchat-collapsible-section.expanded .nexchat-collapsible-content {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+/* Field-specific styling */
+.nexchat-field-container {
+    background: white;
+    border: 1px solid #e1e5e9;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px 0;
+}
+
+.nexchat-field-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #f1f3f5;
+}
+
+.nexchat-field-icon {
+    font-size: 18px;
+}
+
+.nexchat-field-title {
+    font-weight: 600;
+    color: #333;
+    margin: 0;
+}
+
+.nexchat-field-type {
+    background: #f8f9fa;
+    color: #666;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.nexchat-help-section {
+    background: #f8f9ff;
+    border: 1px solid #e1e8ff;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 12px 0;
+}
+
+.nexchat-help-title {
+    font-weight: 600;
+    color: #4a5568;
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.nexchat-help-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.nexchat-help-list li {
+    margin: 4px 0;
+    color: #666;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.nexchat-help-list li::before {
+    content: '•';
+    color: #667eea;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.nexchat-examples-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.nexchat-example-item {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 12px;
+    color: #495057;
+}
+
+/* Date selection styling */
+.nexchat-date-options {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.nexchat-date-option {
+    background: white;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.nexchat-date-option:hover {
+    border-color: #667eea;
+    background: #f0f2ff;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+
+.nexchat-date-primary {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.nexchat-date-secondary {
+    font-size: 12px;
+    color: #666;
+}
+
+/* Search and filter */
+.nexchat-search-container {
+    margin: 8px 0 12px 0;
+    position: relative;
+}
+
+.nexchat-search-input {
+    width: 100%;
+    padding: 10px 16px 10px 40px;
+    border: 1px solid #e1e5e9;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease;
+    box-sizing: border-box;
+}
+
+.nexchat-search-input:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.nexchat-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 16px;
+}
+
+/* Enhanced Pagination for large lists */
+.nexchat-pagination {
+    margin-top: 16px;
+    padding: 16px;
+    background: #f8f9ff;
+    border: 1px solid #e1e8ff;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.nexchat-pagination-info {
+    font-size: 14px;
+    color: #4a5568;
+    font-weight: 500;
+    text-align: center;
+}
+
+.nexchat-pagination-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.nexchat-page-btn, .nexchat-pagination-btn {
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.nexchat-page-btn:hover, .nexchat-pagination-btn:hover {
+    background: #5a67d8;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.nexchat-page-btn:active, .nexchat-pagination-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(102, 126, 234, 0.3);
+}
+
+.nexchat-page-btn:disabled, .nexchat-pagination-btn:disabled {
+    background: #e1e5e9;
+    color: #666;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.nexchat-pagination-btn.active {
+    background: #4c51bf;
+    box-shadow: 0 2px 4px rgba(76, 81, 191, 0.3);
+}
+
+/* Summary and status */
+.nexchat-summary-card {
+    background: #e8f5e8;
+    border: 1px solid #c3e6c3;
+    border-left: 4px solid #28a745;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 12px 0;
+}
+
+.nexchat-summary-title {
+    font-weight: 600;
+    color: #155724;
+    margin: 0 0 8px 0;
+    font-size: 14px;
+}
+
+.nexchat-summary-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+}
+
+.nexchat-summary-list li {
+    margin: 4px 0;
+    color: #155724;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nexchat-summary-label {
+    font-weight: 500;
+}
+
+.nexchat-summary-value {
+    color: #0f5132;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 12px;
+}
+
+/* Enhanced responsive design */
+@media (max-width: 768px) {
+    .nexchat-options-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .nexchat-options-grid.compact {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .nexchat-date-options {
+        grid-template-columns: 1fr;
+    }
+    
+    .nexchat-examples-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 @media (max-width: 480px) {
     .nexchat-widget {
         width: calc(100vw - 40px);
@@ -408,4 +889,129 @@
         font-size: 13px;
         padding: 10px 16px;
     }
-} 
+    
+    .nexchat-options-container {
+        padding: 12px;
+    }
+    
+    .nexchat-option-item {
+        padding: 8px 10px;
+        min-height: 40px;
+    }
+    
+    .nexchat-field-container {
+        padding: 12px;
+    }
+    
+    .nexchat-options-grid.compact {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Responsive pagination */
+    .nexchat-pagination {
+        flex-direction: column;
+        text-align: center;
+        gap: 8px;
+    }
+    
+    .nexchat-pagination-controls {
+        justify-content: center;
+    }
+    
+    .nexchat-page-btn, .nexchat-pagination-btn {
+        padding: 10px 20px;
+        font-size: 16px;
+    }
+}
+
+/* JavaScript for interactive functionality */
+/* This would typically be in a separate .js file, but including here for completeness */
+
+/*
+// Add this JavaScript to your chat interface
+
+function selectOption(value) {
+    // Find the chat input field and set its value
+    const chatInput = document.querySelector('.nexchat-footer input');
+    if (chatInput) {
+        chatInput.value = value;
+        chatInput.focus();
+        
+        // Optionally auto-submit
+        const sendBtn = document.querySelector('.nexchat-send-btn');
+        if (sendBtn && !sendBtn.disabled) {
+            sendBtn.click();
+        }
+    }
+}
+
+function toggleCollapsible(header) {
+    const section = header.closest('.nexchat-collapsible-section');
+    section.classList.toggle('expanded');
+}
+
+function filterOptions(searchValue) {
+    const searchLower = searchValue.toLowerCase();
+    const options = document.querySelectorAll('.nexchat-option-item');
+    
+    options.forEach(option => {
+        const primaryText = option.querySelector('.nexchat-option-primary')?.textContent.toLowerCase() || '';
+        const secondaryText = option.querySelector('.nexchat-option-secondary')?.textContent.toLowerCase() || '';
+        
+        if (primaryText.includes(searchLower) || secondaryText.includes(searchLower)) {
+            option.style.display = 'flex';
+        } else {
+            option.style.display = 'none';
+        }
+    });
+}
+
+// Auto-expand collapsible sections when search is used
+document.addEventListener('input', function(e) {
+    if (e.target.classList.contains('nexchat-search-input')) {
+        const collapsibleSections = document.querySelectorAll('.nexchat-collapsible-section');
+        collapsibleSections.forEach(section => {
+            if (e.target.value.trim()) {
+                section.classList.add('expanded');
+            }
+        });
+    }
+});
+
+// Add keyboard navigation
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const options = Array.from(document.querySelectorAll('.nexchat-option-item:not([style*="display: none"])'));
+        const currentFocus = document.querySelector('.nexchat-option-item.focused');
+        
+        let currentIndex = currentFocus ? options.indexOf(currentFocus) : -1;
+        
+        // Remove current focus
+        if (currentFocus) {
+            currentFocus.classList.remove('focused');
+        }
+        
+        // Calculate new index
+        if (e.key === 'ArrowDown') {
+            currentIndex = (currentIndex + 1) % options.length;
+        } else {
+            currentIndex = currentIndex <= 0 ? options.length - 1 : currentIndex - 1;
+        }
+        
+        // Add focus to new option
+        if (options[currentIndex]) {
+            options[currentIndex].classList.add('focused');
+            options[currentIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        
+        e.preventDefault();
+    } else if (e.key === 'Enter') {
+        const focusedOption = document.querySelector('.nexchat-option-item.focused');
+        if (focusedOption) {
+            focusedOption.click();
+            e.preventDefault();
+        }
+    }
+});
+
+*/ 
