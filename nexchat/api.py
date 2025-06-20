@@ -75,17 +75,13 @@ def process_message(message):
         elif state.get("action") == "collect_role_selection":
             response = handle_role_selection_collection(message, state, user)
         elif state.get("action") == "collect_stock_selection":
-            # Debug for Purchase Order specifically
-            try:
-                if state.get("doctype") == "Purchase Order":
-                    frappe.log_error(f"PO state: {state.get('selection_type')}, msg: {message}", "PO Debug")
-            except:
-                pass
+
             response = handle_stock_selection_collection(message, state, user)
-        elif state.get("action") == "collect_item_details":
-            response = handle_item_details_collection(message, state, user)
-        elif state.get("action") == "collect_transaction_item_details":
-            response = handle_transaction_item_details_collection(message, state, user)
+
+        elif state.get("action") == "collect_child_table":
+            response = handle_child_table_collection(message, state, user)
+        elif state.get("action") == "collect_child_table_field":
+            response = handle_child_table_field_input(message, state, user)
         elif state.get("action") == "collect_update_info":
             response = handle_update_info_collection(message, state, user)
         elif state.get("action") == "collect_update_value":
@@ -107,6 +103,908 @@ def process_message(message):
         frappe.log_error(full_error, "Nexchat Processing Error")
         return {"response": f"Sorry, I encountered an error processing your request. Please try again. (Error: {str(e)[:100]})"}
 
+# --- Generic Child Table Support ---
+def get_required_child_tables(doctype):
+    """Get list of required child tables for a doctype"""
+    try:
+        meta = frappe.get_meta(doctype)
+        required_child_tables = []
+        
+        for df in meta.fields:
+            if df.fieldtype == "Table" and df.reqd:
+                required_child_tables.append(df.fieldname)
+        
+        return required_child_tables
+    except Exception as e:
+        frappe.log_error(f"Error getting required child tables for {doctype}: {str(e)}", "Child Table Error")
+        return []
+
+def get_child_table_fields(child_doctype):
+    """Get required fields for a child table doctype"""
+    try:
+        meta = frappe.get_meta(child_doctype)
+        required_fields = []
+        optional_fields = []
+        
+        for df in meta.fields:
+            # Skip system fields and parent linking fields
+            if df.fieldname in ['name', 'owner', 'creation', 'modified', 'modified_by', 'docstatus', 'parent', 'parenttype', 'parentfield', 'idx']:
+                continue
+            
+            # Check if field is structurally required OR business-critical
+            is_required = df.reqd and not df.hidden and not df.read_only
+            
+            # Add business-critical fields for specific child doctypes
+            if child_doctype == "Purchase Order Item" and df.fieldname in ["rate", "warehouse"]:
+                is_required = True
+            elif child_doctype == "Sales Order Item" and df.fieldname in ["rate", "warehouse"]:
+                is_required = True
+            
+            if is_required:
+                required_fields.append({
+                    "fieldname": df.fieldname,
+                    "label": df.label or df.fieldname.replace("_", " ").title(),
+                    "fieldtype": df.fieldtype,
+                    "options": df.options
+                })
+            elif not df.hidden and not df.read_only and df.fieldtype not in ['Section Break', 'Column Break', 'HTML']:
+                optional_fields.append({
+                    "fieldname": df.fieldname,
+                    "label": df.label or df.fieldname.replace("_", " ").title(),
+                    "fieldtype": df.fieldtype,
+                    "options": df.options
+                })
+        
+        return required_fields, optional_fields
+    except Exception as e:
+        frappe.log_error(f"Error getting child table fields for {child_doctype}: {str(e)}", "Child Table Error")
+        return [], []
+
+def show_child_table_collection(doctype, child_table_field, data, missing_child_tables, user):
+    """Show interface to start collecting child table rows"""
+    try:
+        # Debug: Log the function call
+        try:
+            frappe.log_error(f"show_child_table_collection called: {doctype}, {child_table_field}", "Child Table Setup")
+        except:
+            pass
+        # Get child table metadata
+        meta = frappe.get_meta(doctype)
+        child_table_def = meta.get_field(child_table_field)
+        
+        if not child_table_def:
+            return f"Error: Could not find child table '{child_table_field}' in {doctype}"
+        
+        child_doctype = child_table_def.options
+        child_table_label = child_table_def.label or child_table_field.replace("_", " ").title()
+        
+        # Get required and optional fields for the child table
+        required_fields, optional_fields = get_child_table_fields(child_doctype)
+        
+        # Create beautiful interface
+        response_parts = [
+            f"📋 **Add {child_table_label} to {doctype}**\n",
+            f"**Child Table:** {child_table_label} ({child_doctype})\n"
+        ]
+        
+        if required_fields:
+            response_parts.append("**📝 Required Fields:**")
+            for field in required_fields:
+                field_icon = get_field_icon(field["fieldtype"])
+                response_parts.append(f"  {field_icon} **{field['label']}** ({field['fieldtype']})")
+        
+        if optional_fields:
+            response_parts.append("\n**📄 Optional Fields:**")
+            for field in optional_fields[:5]:  # Show first 5 optional fields
+                field_icon = get_field_icon(field["fieldtype"])
+                response_parts.append(f"  {field_icon} {field['label']} ({field['fieldtype']})")
+            
+            if len(optional_fields) > 5:
+                response_parts.append(f"  ... and {len(optional_fields) - 5} more optional fields")
+        
+        response_parts.extend([
+            f"\n**🎯 Let's collect the first row of {child_table_label}:**",
+            "",
+            "**💡 How it works:**",
+            f"• I'll ask for each required field one by one",
+            f"• You can add multiple rows to the {child_table_label}",
+            f"• Type `skip` to skip optional fields",
+            f"• Type `cancel` to cancel {doctype} creation",
+            "",
+            "**🚀 Ready to start? Type `yes` to begin adding the first row.**"
+        ])
+        
+        # Save state for child table collection
+        state = {
+            "action": "collect_child_table",
+            "doctype": doctype,
+            "child_table_field": child_table_field,
+            "child_doctype": child_doctype,
+            "child_table_label": child_table_label,
+            "data": data,
+            "missing_child_tables": missing_child_tables,
+            "required_fields": required_fields,
+            "optional_fields": optional_fields,
+            "current_row": {},
+            "collected_rows": [],
+            "current_field_index": 0,
+            "stage": "confirm_start"
+        }
+        set_conversation_state(user, state)
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        # Enhanced error logging for child table collection
+        import traceback
+        try:
+            frappe.log_error(f"Error in show_child_table_collection: {str(e)}", "Child Table Error") 
+            frappe.log_error(traceback.format_exc(), "Child Table Traceback")
+        except:
+            pass
+        return f"Error showing child table collection for {child_table_field}: {str(e)}"
+
+def get_field_icon(fieldtype):
+    """Get appropriate emoji icon for field type"""
+    icons = {
+        "Data": "✏️", "Text": "📝", "Long Text": "📄", "Small Text": "📝",
+        "Link": "🔗", "Select": "📋", "Check": "☑️", 
+        "Int": "🔢", "Float": "💯", "Currency": "💰", "Percent": "📊",
+        "Date": "📅", "Datetime": "🕐", "Time": "⏰",
+        "Text Editor": "📝", "Code": "💻", "HTML Editor": "🌐",
+        "Attach": "📎", "Attach Image": "🖼️",
+        "Table": "📋", "Dynamic Link": "🔗"
+    }
+    return icons.get(fieldtype, "📝")
+
+def handle_child_table_collection(message, state, user):
+    """Handle child table row collection conversation"""
+    try:
+        stage = state.get("stage", "confirm_start")
+        user_input = message.strip()
+        
+        # Handle cancel at any stage
+        if user_input.lower() in ['cancel', 'quit', 'exit']:
+            clear_conversation_state(user)
+            doctype = state.get("doctype", "Document")
+            return f"{doctype} creation cancelled."
+        
+        if stage == "confirm_start":
+            # User confirmation to start child table collection
+            if user_input.lower() in ['yes', 'y', 'start', 'begin', '1']:
+                # Start collecting the first field
+                return start_child_field_collection(state, user)
+            else:
+                # Skip this child table
+                return skip_current_child_table(state, user)
+        
+        elif stage == "collect_field":
+            # Collecting individual field values
+            return handle_child_field_input(user_input, state, user)
+        
+        elif stage == "add_more_rows":
+            # Ask if user wants to add more rows
+            if user_input.lower() in ['yes', 'y', 'add', 'more', '1']:
+                # Reset for new row
+                state["current_row"] = {}
+                state["current_field_index"] = 0
+                state["stage"] = "collect_field"
+                set_conversation_state(user, state)
+                return start_child_field_collection(state, user)
+            else:
+                # Done with this child table, move to next or create document
+                return finalize_child_table_collection(state, user)
+        
+        else:
+            clear_conversation_state(user)
+            return "Error in child table collection process. Please start over."
+            
+    except Exception as e:
+        clear_conversation_state(user)
+        return f"Error processing child table collection: {str(e)}"
+
+def start_child_field_collection(state, user):
+    """Start collecting fields for a child table row"""
+    try:
+        required_fields = state.get("required_fields", [])
+        current_field_index = state.get("current_field_index", 0)
+        
+        if current_field_index < len(required_fields):
+            # Still have required fields to collect
+            current_field = required_fields[current_field_index]
+            field_name = current_field["fieldname"]
+            field_label = current_field["label"]
+            fieldtype = current_field["fieldtype"]
+            options = current_field.get("options", "")
+            
+            # Create a context for child table field collection
+            child_table_label = state.get("child_table_label", "Child Table")
+            row_number = len(state.get("collected_rows", [])) + 1
+            doctype = state.get("doctype", "")
+            
+            # Prepare state for smart field selection
+            child_table_state = {
+                "action": "collect_child_table_field",
+                "doctype": doctype,
+                "child_table_data": state,  # Pass the entire child table state
+                "field_info": current_field,
+                "data": {},  # Empty for child table context
+                "missing_fields": [],  # Not used for child table
+                "numbered_options": []
+            }
+            
+            # Use smart field selection for better UX
+            if fieldtype == "Link" and options:
+                # Show numbered options for Link fields
+                return show_child_table_link_selection(field_name, field_label, options, child_table_state, user, child_table_label, row_number)
+            elif fieldtype == "Select" and options:
+                # Show numbered options for Select fields
+                return show_child_table_select_selection(field_name, field_label, options, child_table_state, user, child_table_label, row_number)
+            elif fieldtype == "Date":
+                # Show quick date options
+                return show_child_table_date_selection(field_name, field_label, child_table_state, user, child_table_label, row_number)
+            elif fieldtype in ["Currency", "Float", "Int", "Percent"]:
+                # Show numeric input interface
+                return show_child_table_numeric_input(field_name, field_label, fieldtype, child_table_state, user, child_table_label, row_number)
+            else:
+                # Default text input with enhanced formatting
+                return show_child_table_text_input(field_name, field_label, fieldtype, child_table_state, user, child_table_label, row_number)
+        else:
+            # All required fields collected, finalize this row
+            return finalize_current_row(state, user)
+    
+    except Exception as e:
+        return f"Error starting field collection: {str(e)}"
+
+def show_child_table_link_selection(field_name, field_label, link_doctype, state, user, child_table_label, row_number):
+    """Show numbered options for Link fields in child tables"""
+    try:
+        # Get available records for the link doctype
+        records = frappe.get_all(link_doctype, 
+                                fields=["name"],
+                                order_by="name",
+                                limit=20)  # Limit for child table context
+        
+        # Try to get a better display field
+        link_meta = frappe.get_meta(link_doctype)
+        display_field = None
+        for field in ["title", "full_name", "item_name", "uom_name"]:
+            if link_meta.get_field(field):
+                display_field = field
+                break
+        
+        if display_field:
+            records = frappe.get_all(link_doctype, 
+                                   fields=["name", display_field],
+                                   order_by="name",
+                                   limit=20)
+        
+        # Create beautiful interface
+        response_parts = [
+            f"🔗 **{child_table_label} Row {row_number}**\n",
+            f"**Select {field_label}:**\n"
+        ]
+        
+        if records:
+            response_parts.append(f"**📋 Available {link_doctype}s:**")
+            record_names = []
+            
+            # Unicode circled numbers for beautiful badges
+            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+            
+            for i, record in enumerate(records, 1):
+                record_display = f"**{record.name}**"
+                if display_field and record.get(display_field) and record.get(display_field) != record.name:
+                    record_display += f" - _{record.get(display_field)}_"
+                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+                response_parts.append(f"{badge} {record_display}")
+                record_names.append(record.name)
+            
+            response_parts.extend([
+                "",
+                f"📊 **Total {link_doctype}s:** {len(records)}",
+                "",
+                "**💡 How to select:**",
+                "• Type a **number** (e.g., `1`) for your choice",
+                "• Type the **name** directly",
+                "• Type `cancel` to cancel",
+                "",
+                "**📝 Examples:**",
+                f"• `1` → {record_names[0] if record_names else f'First {link_doctype}'}",
+                f"• `{record_names[0] if record_names else 'Name'}` → By name"
+            ])
+        else:
+            response_parts.extend([
+                f"**ℹ️ No {link_doctype.lower()}s found.**",
+                "",
+                "**💡 How to proceed:**",
+                "• Type a **name** directly",
+                "• Type `cancel` to cancel"
+            ])
+            record_names = []
+        
+        # Save state for child table field collection
+        state["numbered_options"] = record_names
+        set_conversation_state(user, state)
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"Error showing {field_label} selection: {str(e)}"
+
+def show_child_table_select_selection(field_name, field_label, options, state, user, child_table_label, row_number):
+    """Show numbered options for Select fields in child tables"""
+    try:
+        # Parse options (they come as newline-separated string)
+        option_list = [opt.strip() for opt in options.split('\n') if opt.strip()]
+        
+        response_parts = [
+            f"📋 **{child_table_label} Row {row_number}**\n",
+            f"**Select {field_label}:**\n"
+        ]
+        
+        if option_list:
+            response_parts.append("**📋 Available Options:**")
+            # Unicode circled numbers for beautiful badges
+            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+            
+            for i, option in enumerate(option_list, 1):
+                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+                response_parts.append(f"{badge} **{option}**")
+            
+            response_parts.extend([
+                "",
+                f"📊 **Total Options:** {len(option_list)}",
+                "",
+                "**💡 How to select:**",
+                "• Type a **number** (e.g., `1`) for your choice",
+                "• Type the **option name** directly",
+                "• Type `cancel` to cancel",
+                "",
+                "**📝 Examples:**",
+                f"• `1` → {option_list[0] if option_list else 'First Option'}",
+                f"• `{option_list[0] if option_list else 'Option Name'}` → By name"
+            ])
+        else:
+            response_parts.extend([
+                "**ℹ️ No options available.**",
+                "",
+                "**💡 How to proceed:**",
+                "• Type `cancel` to cancel"
+            ])
+        
+        # Save state for child table field collection
+        state["numbered_options"] = option_list
+        set_conversation_state(user, state)
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"Error showing {field_label} selection: {str(e)}"
+
+def show_child_table_date_selection(field_name, field_label, state, user, child_table_label, row_number):
+    """Show quick date options for Date fields in child tables"""
+    try:
+        from datetime import date, timedelta
+        
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        week_later = today + timedelta(days=7)
+        month_later = today + timedelta(days=30)
+        
+        response_parts = [
+            f"📅 **{child_table_label} Row {row_number}**\n",
+            f"**Select {field_label}:**\n",
+            "**🗓️ Quick Date Options:**"
+        ]
+        
+        # Add quick date options with circular badges
+        circled_numbers = ["①", "②", "③", "④"]
+        quick_options = [
+            (f"**Today** - {today.strftime('%Y-%m-%d')}", today.strftime('%A')),
+            (f"**Tomorrow** - {tomorrow.strftime('%Y-%m-%d')}", tomorrow.strftime('%A')),
+            (f"**Next Week** - {week_later.strftime('%Y-%m-%d')}", week_later.strftime('%A')),
+            (f"**Next Month** - {month_later.strftime('%Y-%m-%d')}", month_later.strftime('%A'))
+        ]
+        
+        date_options = []
+        for i, (option_text, day_name) in enumerate(quick_options):
+            response_parts.append(f"{circled_numbers[i]} {option_text} ({day_name})")
+            if i == 0:
+                date_options.append(today.strftime("%Y-%m-%d"))
+            elif i == 1:
+                date_options.append(tomorrow.strftime("%Y-%m-%d"))
+            elif i == 2:
+                date_options.append(week_later.strftime("%Y-%m-%d"))
+            elif i == 3:
+                date_options.append(month_later.strftime("%Y-%m-%d"))
+        
+        response_parts.extend([
+            "",
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `1`) for quick options",
+            "• Type a **custom date** in YYYY-MM-DD format",
+            "• Type `cancel` to cancel",
+            "",
+            "**📝 Examples:**",
+            "• `1` → Today",
+            "• `2024-12-25` → Christmas Day",
+            "• `2024-06-15` → June 15th, 2024"
+        ])
+        
+        # Save state for child table field collection
+        state["numbered_options"] = date_options
+        set_conversation_state(user, state)
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"Error showing {field_label} selection: {str(e)}"
+
+def show_child_table_numeric_input(field_name, field_label, fieldtype, state, user, child_table_label, row_number):
+    """Show numeric input interface for numeric fields in child tables"""
+    try:
+        # Create appropriate icon and examples based on field type
+        if fieldtype == "Int":
+            icon = "🔢"
+            examples = ["• `100` → 100", "• `250` → 250", "• `1000` → 1,000"]
+            description = f"whole number for {field_label.lower()}"
+        elif fieldtype == "Currency":
+            icon = "💰"
+            examples = ["• `100.50` → ₹100.50", "• `25000` → ₹25,000", "• `1000.99` → ₹1,000.99"]
+            description = f"amount for {field_label.lower()}"
+        elif fieldtype == "Percent":
+            icon = "📊" 
+            examples = ["• `15` → 15%", "• `25.5` → 25.5%", "• `100` → 100%"]
+            description = f"percentage for {field_label.lower()}"
+        else:  # Float
+            icon = "💯"
+            examples = ["• `100.50` → 100.50", "• `25.75` → 25.75", "• `1000.99` → 1,000.99"]
+            description = f"decimal number for {field_label.lower()}"
+        
+        response_parts = [
+            f"{icon} **{child_table_label} Row {row_number}**\n",
+            f"**Enter {field_label}:**\n",
+            f"💡 **Field Type:** {fieldtype}",
+            "",
+            "**📝 Examples:**"
+        ]
+        response_parts.extend(examples)
+        response_parts.extend([
+            "",
+            "**💡 How to enter:**",
+            f"• Type a {description}",
+            "• Type `0` if no value",
+            "• Type `cancel` to cancel"
+        ])
+        
+        # Save state for child table field collection
+        state["numbered_options"] = []
+        set_conversation_state(user, state)
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"Error showing {field_label} input: {str(e)}"
+
+def show_child_table_text_input(field_name, field_label, fieldtype, state, user, child_table_label, row_number):
+    """Show text input interface for text fields in child tables"""
+    try:
+        # Get appropriate icon based on field type
+        field_icons = {
+            "Data": "✏️",
+            "Text": "📝", 
+            "Small Text": "📝",
+            "Text Editor": "📄"
+        }
+        
+        icon = field_icons.get(fieldtype, "✏️")
+        
+        response_parts = [
+            f"{icon} **{child_table_label} Row {row_number}**\n",
+            f"**Enter {field_label}:**\n",
+            f"💡 **Field Type:** {fieldtype}",
+            "",
+            "**💡 How to enter:**",
+            "• Type your text directly",
+            "• Type `cancel` to cancel",
+            "",
+            "**📝 Example:**",
+            f"• `Your {field_label.lower()} here`"
+        ]
+        
+        # Save state for child table field collection
+        state["numbered_options"] = []
+        set_conversation_state(user, state)
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"Error showing {field_label} input: {str(e)}"
+
+def handle_child_table_field_input(message, state, user):
+    """Handle input for child table fields with enhanced numbered options"""
+    try:
+        user_input = message.strip()
+        
+        # Handle cancel at any stage
+        if user_input.lower() in ['cancel', 'quit', 'exit']:
+            clear_conversation_state(user)
+            doctype = state.get("doctype", "Document")
+            return f"{doctype} creation cancelled."
+        
+        # Get the child table state and field info
+        child_table_data = state.get("child_table_data", {})
+        field_info = state.get("field_info", {})
+        numbered_options = state.get("numbered_options", [])
+        
+        fieldname = field_info["fieldname"]
+        fieldtype = field_info["fieldtype"]
+        field_label = field_info["label"]
+        
+        selected_value = None
+        
+        # Handle numbered options first (for Link, Select, Date fields)
+        if numbered_options and user_input.isdigit():
+            try:
+                num = int(user_input)
+                if 1 <= num <= len(numbered_options):
+                    selected_value = numbered_options[num - 1]
+                else:
+                    return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
+            except ValueError:
+                return f"❌ Invalid input. Please use numbers or direct input."
+        else:
+            # Handle direct input or non-numeric fields
+            try:
+                # Use the existing validation function
+                selected_value = validate_field_input(user_input, field_info)
+            except ValueError as e:
+                # Show error and ask again with appropriate interface
+                return f"❌ {str(e)}\n\nPlease try again or type `cancel` to cancel."
+        
+        # If we got a valid value, update the child table data
+        if selected_value is not None:
+            current_row = child_table_data.get("current_row", {})
+            current_row[fieldname] = selected_value
+            
+            # Move to next field
+            current_field_index = child_table_data.get("current_field_index", 0)
+            child_table_data["current_row"] = current_row
+            child_table_data["current_field_index"] = current_field_index + 1
+            
+            # Update the original child table state
+            state["child_table_data"] = child_table_data
+            
+            # Continue with the original child table collection flow
+            child_table_data["stage"] = "collect_field"
+            set_conversation_state(user, child_table_data)
+            
+            return start_child_field_collection(child_table_data, user)
+        else:
+            return "❌ Invalid input. Please try again or type `cancel` to cancel."
+            
+    except Exception as e:
+        clear_conversation_state(user)
+        return f"Error processing child table field input: {str(e)}"
+
+def handle_child_field_input(user_input, state, user):
+    """Handle input for a specific child table field"""
+    try:
+        required_fields = state.get("required_fields", [])
+        current_field_index = state.get("current_field_index", 0)
+        current_row = state.get("current_row", {})
+        
+        if current_field_index >= len(required_fields):
+            return finalize_current_row(state, user)
+        
+        current_field = required_fields[current_field_index]
+        fieldname = current_field["fieldname"]
+        fieldtype = current_field["fieldtype"]
+        
+        # Validate and convert the input based on field type
+        try:
+            validated_value = validate_field_input(user_input, current_field)
+            current_row[fieldname] = validated_value
+            
+            # Move to next field
+            state["current_row"] = current_row
+            state["current_field_index"] = current_field_index + 1
+            set_conversation_state(user, state)
+            
+            return start_child_field_collection(state, user)
+            
+        except ValueError as e:
+            # Invalid input, ask again
+            field_icon = get_field_icon(fieldtype)
+            return f"❌ {str(e)}\n\n{field_icon} **Please enter {current_field['label']} again:**\n{get_field_input_help(current_field)}"
+    
+    except Exception as e:
+        return f"Error handling field input: {str(e)}"
+
+def validate_field_input(user_input, field_info):
+    """Validate user input based on field type"""
+    fieldtype = field_info["fieldtype"]
+    fieldname = field_info["fieldname"]
+    
+    if fieldtype == "Int":
+        try:
+            return int(float(user_input))
+        except ValueError:
+            raise ValueError(f"Invalid integer value. Please enter a whole number.")
+    
+    elif fieldtype in ["Float", "Currency", "Percent"]:
+        try:
+            return float(user_input)
+        except ValueError:
+            raise ValueError(f"Invalid number. Please enter a decimal number.")
+    
+    elif fieldtype == "Date":
+        import re
+        if re.match(r'^\d{4}-\d{2}-\d{2}$', user_input):
+            from datetime import datetime
+            try:
+                datetime.strptime(user_input, '%Y-%m-%d')
+                return user_input
+            except ValueError:
+                raise ValueError("Invalid date. Please use YYYY-MM-DD format.")
+        else:
+            raise ValueError("Invalid date format. Please use YYYY-MM-DD format (e.g., 2024-12-31).")
+    
+    elif fieldtype == "Link":
+        # Check if linked document exists
+        link_doctype = field_info.get("options")
+        if link_doctype and not frappe.db.exists(link_doctype, user_input):
+            raise ValueError(f"{link_doctype} '{user_input}' does not exist. Please use an existing {link_doctype}.")
+        return user_input
+    
+    elif fieldtype == "Select":
+        # Validate against available options
+        options = field_info.get("options", "")
+        if options:
+            valid_options = [opt.strip() for opt in options.split('\n') if opt.strip()]
+            if user_input not in valid_options:
+                options_text = ", ".join(valid_options)
+                raise ValueError(f"Invalid option. Please choose from: {options_text}")
+        return user_input
+    
+    else:
+        # For Data, Text, etc. - basic validation
+        if not user_input.strip():
+            raise ValueError("This field cannot be empty. Please enter a value.")
+        return user_input.strip()
+
+def get_field_input_help(field_info):
+    """Get help text for field input based on field type"""
+    fieldtype = field_info["fieldtype"]
+    
+    if fieldtype == "Int":
+        return "**Example:** `100`, `250`, `1000`"
+    elif fieldtype in ["Float", "Currency"]:
+        return "**Example:** `100.50`, `25.75`, `1000.99`"
+    elif fieldtype == "Percent":
+        return "**Example:** `15`, `25.5`, `100`"
+    elif fieldtype == "Date":
+        return "**Example:** `2024-12-31`, `2024-06-15`\n**Format:** YYYY-MM-DD"
+    elif fieldtype == "Link":
+        link_doctype = field_info.get("options", "")
+        return f"**Example:** Enter an existing {link_doctype} name"
+    elif fieldtype == "Select":
+        options = field_info.get("options", "")
+        if options:
+            valid_options = [opt.strip() for opt in options.split('\n') if opt.strip()][:3]
+            return f"**Options:** {', '.join(valid_options)}"
+        return "**Example:** Select from available options"
+    else:
+        return "**Example:** Enter text value"
+
+def finalize_current_row(state, user):
+    """Finalize the current child table row and ask if user wants to add more"""
+    try:
+        current_row = state.get("current_row", {})
+        collected_rows = state.get("collected_rows", [])
+        child_table_label = state.get("child_table_label", "Child Table")
+        
+        # Add current row to collected rows
+        collected_rows.append(current_row.copy())
+        
+        # Show summary of added row
+        response_parts = [
+            "✅ **Row Added Successfully!**\n",
+            f"**{child_table_label} Row {len(collected_rows)}:**"
+        ]
+        
+        for fieldname, value in current_row.items():
+            # Get field label from required_fields
+            field_label = fieldname
+            for field in state.get("required_fields", []):
+                if field["fieldname"] == fieldname:
+                    field_label = field["label"]
+                    break
+            response_parts.append(f"• **{field_label}:** {value}")
+        
+        response_parts.extend([
+            f"\n📋 **Total {child_table_label} Rows:** {len(collected_rows)}",
+            "",
+            "🔄 **Add Another Row?**",
+            f"• Type `yes` to add another {child_table_label} row",
+            f"• Type `no` to continue with document creation"
+        ])
+        
+        # Update state
+        state.update({
+            "stage": "add_more_rows",
+            "collected_rows": collected_rows,
+            "current_row": {},
+            "current_field_index": 0
+        })
+        set_conversation_state(user, state)
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"Error finalizing row: {str(e)}"
+
+def finalize_child_table_collection(state, user):
+    """Finalize child table collection and continue with document creation"""
+    try:
+        doctype = state.get("doctype")
+        child_table_field = state.get("child_table_field")
+        collected_rows = state.get("collected_rows", [])
+        data = state.get("data", {})
+        missing_child_tables = state.get("missing_child_tables", [])
+        
+        # Add collected rows to document data
+        data[child_table_field] = collected_rows
+        
+        # Remove this child table from missing list
+        if child_table_field in missing_child_tables:
+            missing_child_tables.remove(child_table_field)
+        
+        # Check if we have more child tables to collect
+        if missing_child_tables:
+            # Move to next child table
+            next_child_table = missing_child_tables[0]
+            return show_child_table_collection(doctype, next_child_table, data, missing_child_tables, user)
+        else:
+            # All child tables collected, create the document
+            clear_conversation_state(user)
+            return create_document(doctype, data, user)
+            
+    except Exception as e:
+        clear_conversation_state(user)
+        return f"Error finalizing child table collection: {str(e)}"
+
+def skip_current_child_table(state, user):
+    """Skip the current child table and move to next or create document"""
+    try:
+        doctype = state.get("doctype")
+        child_table_field = state.get("child_table_field")
+        data = state.get("data", {})
+        missing_child_tables = state.get("missing_child_tables", [])
+        
+        # Remove this child table from missing list (skip it)
+        if child_table_field in missing_child_tables:
+            missing_child_tables.remove(child_table_field)
+        
+        # Check if we have more child tables to collect
+        if missing_child_tables:
+            # Move to next child table
+            next_child_table = missing_child_tables[0]
+            return show_child_table_collection(doctype, next_child_table, data, missing_child_tables, user)
+        else:
+            # No more child tables, create the document
+            clear_conversation_state(user)
+            return create_document(doctype, data, user)
+            
+    except Exception as e:
+        clear_conversation_state(user)
+        return f"Error skipping child table: {str(e)}"
+
+def get_optional_child_tables(doctype):
+    """Get list of optional but commonly used child tables for a doctype"""
+    try:
+        meta = frappe.get_meta(doctype)
+        optional_child_tables = []
+        
+        for df in meta.fields:
+            if df.fieldtype == "Table" and not df.reqd:
+                # Include commonly useful optional child tables
+                if df.fieldname in ['contacts', 'addresses', 'payment_schedule', 'education', 'external_work_history', 'item_prices']:
+                    optional_child_tables.append({
+                        "fieldname": df.fieldname,
+                        "label": df.label or df.fieldname.replace("_", " ").title(),
+                        "options": df.options
+                    })
+        
+        return optional_child_tables
+    except Exception as e:
+        frappe.log_error(f"Error getting optional child tables for {doctype}: {str(e)}", "Child Table Error")
+        return []
+
+def suggest_optional_child_tables(doctype, data, user):
+    """Suggest optional child tables that user might want to add"""
+    try:
+        optional_child_tables = get_optional_child_tables(doctype)
+        
+        if not optional_child_tables:
+            return None
+        
+        response_parts = [
+            f"✅ **{doctype} Created Successfully!**\n",
+            "**📋 Optional Child Tables Available:**",
+            "_You can add these for more complete data:_\n"
+        ]
+        
+        for i, child_table in enumerate(optional_child_tables, 1):
+            response_parts.append(f"`{i}` **{child_table['label']}** ({child_table['options']})")
+        
+        response_parts.extend([
+            "",
+            "**💡 Would you like to add any of these?**",
+            "• Type a **number** to add that child table",
+            "• Type `no` or `done` to finish",
+            "• All child tables can be added later via ERPNext UI"
+        ])
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return None
+
+@frappe.whitelist()
+def test_child_table_detection(doctype):
+    """Test function to see what child tables are detected for a doctype"""
+    try:
+        if not frappe.has_permission(doctype, "read"):
+            return {"error": f"No permission to access {doctype}"}
+        
+        required_child_tables = get_required_child_tables(doctype)
+        optional_child_tables = get_optional_child_tables(doctype)
+        
+        # Get all child tables for comparison
+        meta = frappe.get_meta(doctype)
+        all_child_tables = []
+        for df in meta.fields:
+            if df.fieldtype == "Table":
+                all_child_tables.append({
+                    "fieldname": df.fieldname,
+                    "label": df.label or df.fieldname.replace("_", " ").title(),
+                    "options": df.options,
+                    "required": df.reqd
+                })
+        
+        return {
+            "doctype": doctype,
+            "required_child_tables": required_child_tables,
+            "optional_child_tables": optional_child_tables,
+            "all_child_tables": all_child_tables,
+            "total_child_tables": len(all_child_tables)
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+@frappe.whitelist()
+def test_child_table_fields(child_doctype):
+    """Test function to see what fields are detected for a child doctype"""
+    try:
+        if not frappe.db.exists("DocType", child_doctype):
+            return {"error": f"DocType {child_doctype} does not exist"}
+        
+        required_fields, optional_fields = get_child_table_fields(child_doctype)
+        
+        return {
+            "child_doctype": child_doctype,
+            "required_fields": required_fields,
+            "optional_fields": optional_fields,
+            "total_required": len(required_fields),
+            "total_optional": len(optional_fields)
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 def handle_field_collection(message, state, user):
     """Handle collection of required fields for document creation"""
     try:
@@ -123,33 +1021,10 @@ def handle_field_collection(message, state, user):
             field_to_ask = state["missing_fields"][0]
             doctype = state["doctype"]
             
-            # Special handling for Stock Entry fields with interactive selection
-            if doctype == "Stock Entry":
-                data = state["data"]
-                # Always prioritize critical fields in order and check for items
-                has_stock_type = data.get("stock_entry_type") or data.get("purpose")
-                has_company = data.get("company")
-                has_source_warehouse = data.get("from_warehouse") or data.get("s_warehouse")
-                has_items = data.get("items_list") and len(data.get("items_list", [])) > 0
-                
-                if not has_stock_type:
-                    return show_stock_entry_type_selection(state["data"], state["missing_fields"], user)
-                elif not has_company:
-                    return show_company_selection(state["data"], state["missing_fields"], user, "Stock Entry")
-                elif not has_source_warehouse:
-                    # Need source warehouse for most stock entry types
-                    return show_warehouse_selection("from_warehouse", state["data"], state["missing_fields"], user)
-                elif not has_items:
-                    # Always need items for Stock Entry
-                    return show_items_selection(state["data"], state["missing_fields"], user)
-                elif field_to_ask in ["from_warehouse", "to_warehouse", "s_warehouse", "t_warehouse"]:
-                    return show_warehouse_selection(field_to_ask, state["data"], state["missing_fields"], user)
-                else:
-                    # Debug: Log what field is being asked for
-                    frappe.log_error(f"Stock Entry field being asked: {field_to_ask}", "Nexchat Debug")
+            # Stock Entry specific hardcoded logic removed - now handled by generic system
             
             # Special handling for Asset fields with interactive selection
-            elif doctype == "Asset":
+            if doctype == "Asset":
                 if field_to_ask == "company":
                     return show_company_selection(state["data"], state["missing_fields"], user, "Asset")
                 elif field_to_ask == "item_code":
@@ -173,12 +1048,7 @@ def handle_field_collection(message, state, user):
             doctype = state["doctype"]
             data = state["data"]
             
-            # Special check for Stock Entry to ensure we have items
-            if doctype == "Stock Entry":
-                has_items = data.get("items_list") and len(data.get("items_list", [])) > 0
-                if not has_items:
-                    # Need to collect items
-                    return show_items_selection(data, [], user)
+            # Hardcoded Stock Entry check removed - now handled by generic child table system
             
             # Clear conversation state since we're done collecting
             clear_conversation_state(user)
@@ -373,6 +1243,12 @@ def handle_stock_selection_collection(message, state, user):
         numbered_options = state.get("numbered_options", [])
         user_input = message.strip()
         
+        # Debug: Log the function entry state  
+        try:
+            frappe.log_error(f"Function entry: missing_fields={missing_fields}, len={len(missing_fields) if missing_fields else 0}", "Function Entry Debug")
+        except:
+            pass
+        
         # Handle cancel
         if user_input.lower() in ['cancel', 'quit', 'exit']:
             clear_conversation_state(user)
@@ -517,9 +1393,10 @@ def handle_stock_selection_collection(message, state, user):
         # Get current doctype from state - CRITICAL: This must be preserved!
         current_doctype = state.get("doctype")
         
-        # Debug: Log the doctype from state and data
+        # Debug: Log the doctype from state (data truncated to avoid char limit)
         try:
-            frappe.log_error(f"Doctype from state: {current_doctype}, Data: {data}, Selection: {selection_type}", "State Debug")
+            data_summary = f"{len(data)} fields" if data else "no data"
+            frappe.log_error(f"Doctype: {current_doctype}, Data: {data_summary}, Selection: {selection_type}", "State Debug")
         except:
             pass
         
@@ -583,8 +1460,8 @@ def handle_stock_selection_collection(message, state, user):
                     return show_warehouse_selection("from_warehouse", data, remaining_fields, user)
             
             if has_stock_type and has_company and warehouse_requirement_met and not has_items:
-                # Ready to collect items for Stock Entry
-                return show_items_selection(data, remaining_fields, user)
+                # Ready to collect items for Stock Entry - use generic child table system
+                pass  # Will be handled by generic child table collection
         elif remaining_fields:
             # Continue with next field
             next_field = remaining_fields[0]
@@ -595,48 +1472,16 @@ def handle_stock_selection_collection(message, state, user):
             elif next_field in ["from_warehouse", "to_warehouse", "s_warehouse", "t_warehouse"]:
                 return show_warehouse_selection(next_field, data, remaining_fields, user)
             elif next_field == "items":
-                return show_items_selection(data, remaining_fields, user)
+                # Handle items field using generic child table system
+                # This will be handled automatically by the generic field collection
+                pass
             else:
-                # For Purchase Order, check if we have basic fields and can proceed to items
-                if current_doctype == "Purchase Order":
-                    has_series = data.get("naming_series")
-                    has_supplier = data.get("supplier") 
-                    has_company = data.get("company")
-                    has_date = data.get("transaction_date")
-                    
-                    # If we have all basic required fields, go to items collection
-                    if has_series and has_supplier and has_company:
-                        # Set default date if missing
-                        if not has_date:
-                            from datetime import date
-                            data["transaction_date"] = date.today().strftime("%Y-%m-%d")
-                        
-                        # Ready to collect items for Purchase Order
-                        return show_transaction_items_selection(current_doctype, data, remaining_fields, user)
-                
-                # For Purchase Invoice, check if we have basic fields and can proceed to items  
-                elif current_doctype == "Purchase Invoice":
-                    has_series = data.get("naming_series")
-                    has_supplier = data.get("supplier")
-                    has_company = data.get("company") 
-                    has_date = data.get("posting_date")
-                    
-                    # If we have all basic required fields, go to items collection
-                    if has_series and has_supplier and has_company:
-                        # Set default date if missing
-                        if not has_date:
-                            from datetime import date
-                            data["posting_date"] = date.today().strftime("%Y-%m-%d")
-                        
-                        # Ready to collect items for Purchase Invoice
-                        return show_transaction_items_selection(current_doctype, data, remaining_fields, user)
+                # Transaction document logic removed - now handled by generic child table system
+                # Default dates will be handled by field defaults or validation
                 
                 # Use smart field selection for all other fields
                 # CRITICAL: Don't default to Stock Entry, use current doctype from state
-                try:
-                    frappe.log_error(f"Before detection: {current_doctype}, {next_field}", "Debug Flow")
-                except:
-                    pass
+
                 
                 if not current_doctype:
                     # CRITICAL: Check naming series FIRST before other detection
@@ -682,18 +1527,8 @@ def handle_stock_selection_collection(message, state, user):
                         # Final fallback
                         current_doctype = "Stock Entry"
                 
-                try:
-                    frappe.log_error(f"Getting meta: {current_doctype}, {next_field}", "Debug Meta")
-                except:
-                    pass
-                
                 meta = frappe.get_meta(current_doctype)
                 field_obj = meta.get_field(next_field)
-                
-                try:
-                    frappe.log_error(f"Field obj: {field_obj is not None}", "Debug Field")
-                except:
-                    pass
                 
                 if field_obj:
                     # Use smart field selection
@@ -737,29 +1572,29 @@ def handle_stock_selection_collection(message, state, user):
                             current_doctype = "Purchase Invoice"
                         else:
                             current_doctype = "Purchase Order"
-                elif "customer" in data:
-                    # Could be Sales Order, Sales Invoice, or Quotation
-                    if any(field in data for field in ["due_date", "posting_date"]) and "delivery_date" not in data:
-                        current_doctype = "Sales Invoice"
-                    elif "valid_till" in data:
-                        current_doctype = "Quotation"
+                    elif "customer" in data:
+                        # Could be Sales Order, Sales Invoice, or Quotation
+                        if any(field in data for field in ["due_date", "posting_date"]) and "delivery_date" not in data:
+                            current_doctype = "Sales Invoice"
+                        elif "valid_till" in data:
+                            current_doctype = "Quotation"
+                        else:
+                            current_doctype = "Sales Order"
+                    elif "employee_name" in data or "first_name" in data:
+                        current_doctype = "Employee"
+                    elif "customer_name" in data:
+                        current_doctype = "Customer"
+                    elif "supplier_name" in data:
+                        current_doctype = "Supplier"
+                    elif "item_name" in data and not any(field in data for field in ["location", "gross_purchase_amount"]):
+                        current_doctype = "Item"
+                    elif "item_code" in data and any(field in data for field in ["location", "gross_purchase_amount"]):
+                        current_doctype = "Asset"
+                    elif "stock_entry_type" in data or "purpose" in data or any(field in data for field in ["from_warehouse", "to_warehouse", "s_warehouse", "t_warehouse"]):
+                        current_doctype = "Stock Entry"
                     else:
-                        current_doctype = "Sales Order"
-                elif "employee_name" in data or "first_name" in data:
-                    current_doctype = "Employee"
-                elif "customer_name" in data:
-                    current_doctype = "Customer"
-                elif "supplier_name" in data:
-                    current_doctype = "Supplier"
-                elif "item_name" in data and not any(field in data for field in ["location", "gross_purchase_amount"]):
-                    current_doctype = "Item"
-                elif "item_code" in data and any(field in data for field in ["location", "gross_purchase_amount"]):
-                    current_doctype = "Asset"
-                elif "stock_entry_type" in data or "purpose" in data or any(field in data for field in ["from_warehouse", "to_warehouse", "s_warehouse", "t_warehouse"]):
-                    current_doctype = "Stock Entry"
-                else:
-                    # Final fallback
-                    current_doctype = "Stock Entry"
+                        # Final fallback
+                        current_doctype = "Stock Entry"
             
             # ULTIMATE FAILSAFE: Force correct doctype detection if it's still wrong
             if current_doctype == "Stock Entry" and data.get("naming_series"):
@@ -773,298 +1608,65 @@ def handle_stock_selection_collection(message, state, user):
                 elif "PUR-ORD-" in series:
                     current_doctype = "Purchase Order"
             
-            # Debug: Log the final doctype determination
+            # Debug: Log the final doctype determination (truncated data keys)
             try:
-                frappe.log_error(f"Final doctype: {current_doctype}, Data keys: {list(data.keys())}", "Doctype Debug")
+                key_count = len(data.keys()) if data else 0
+                frappe.log_error(f"Final doctype: {current_doctype}, Keys: {key_count}", "Doctype Debug")
             except:
                 pass
             
-            # Handle doctype-specific logic based on FINAL determined doctype
-            if current_doctype == "Stock Entry":
-                # For Stock Entry, check if we have items
-                has_items = data.get("items_list") and len(data.get("items_list", [])) > 0
-                if has_items:
-                    # All good, create the document
-                    clear_conversation_state(user)
-                    return create_document("Stock Entry", data, user)
-                else:
-                    # Missing items, go to Stock Entry item selection
-                    return show_items_selection(data, [], user)
-            elif current_doctype in ["Purchase Order", "Sales Order", "Purchase Invoice", "Sales Invoice", "Quotation"]:
-                # For transaction documents, check if they need items
-                has_transaction_items = data.get("items") or data.get("items_list")
-                
-                if not has_transaction_items:
-                    # CRITICAL FIX: Need to collect items for transaction documents
-                    try:
-                        frappe.log_error(f"Going to transaction items for: {current_doctype}", "Transaction Items Debug")
-                    except:
-                        pass
-                    return show_transaction_items_selection(current_doctype, data, [], user)
-                else:
-                    # All good, create the document
-                    clear_conversation_state(user)
-                    return create_document(current_doctype, data, user)
+            # CRITICAL FIX: Check for required child tables before creating document
+            try:
+                frappe.log_error(f"About to call get_required_child_tables for: {current_doctype}", "Child Table Start")
+                required_child_tables = get_required_child_tables(current_doctype)
+                frappe.log_error(f"get_required_child_tables returned: {required_child_tables}", "Child Table Result")
+            except Exception as e:
+                frappe.log_error(f"Error in get_required_child_tables: {str(e)}", "Child Table Error")
+                required_child_tables = []
+            
+            missing_child_tables = []
+            
+            try:
+                for child_table in required_child_tables:
+                    if child_table not in data or not data[child_table]:
+                        missing_child_tables.append(child_table)
+                frappe.log_error(f"Missing child tables calculation complete: {missing_child_tables}", "Child Table Missing")
+            except Exception as e:
+                frappe.log_error(f"Error calculating missing child tables: {str(e)}", "Child Table Missing Error")
+            
+            # Debug: Log child table transition
+            try:
+                frappe.log_error(f"Child check for {current_doctype}: required={required_child_tables}, missing={missing_child_tables}", "Final Child Check")
+            except:
+                pass
+            
+            if missing_child_tables:
+                # Need to collect child tables first
+                child_table_to_collect = missing_child_tables[0]
+                try:
+                    frappe.log_error(f"Final transition to child table: {child_table_to_collect} for {current_doctype}", "Final Child Transition")
+                except:
+                    pass
+                return show_child_table_collection(current_doctype, child_table_to_collect, data, missing_child_tables, user)
             else:
-                # For other doctypes (Asset, Customer, Supplier, etc.), create directly
+                # All required fields and child tables are present, create the document
                 clear_conversation_state(user)
                 return create_document(current_doctype, data, user)
             
     except Exception as e:
-        # Enhanced error logging for debugging
+        # Enhanced error logging for debugging (truncated to avoid char limit)
         import traceback
-        error_details = f"Error in handle_stock_selection_collection: {str(e)}\nTraceback: {traceback.format_exc()}"
+        error_msg = str(e)[:80] + "..." if len(str(e)) > 80 else str(e)
         try:
-            frappe.log_error(error_details, "Nexchat Debug Error")
+            frappe.log_error(f"Error in handle_stock_selection_collection: {error_msg}", "Nexchat Error")
+            # Log full traceback separately if needed
+            frappe.log_error(traceback.format_exc(), "Nexchat Traceback")
         except:
             pass
         clear_conversation_state(user)
         return f"Error processing selection: {str(e)}. Please try again or contact support."
 
-def handle_item_details_collection(message, state, user):
-    """Handle comprehensive item details collection for Stock Entry"""
-    try:
-        stage = state.get("stage", "item_selection")
-        data = state.get("data", {})
-        current_item = state.get("current_item", {})
-        items_list = state.get("items_list", [])
-        needs_target_warehouse = state.get("needs_target_warehouse", False)
-        numbered_options = state.get("numbered_options", [])
-        user_input = message.strip()
-        
-        # Handle cancel
-        if user_input.lower() in ['cancel', 'quit', 'exit']:
-            clear_conversation_state(user)
-            doctype_name = state.get("data", {}).get("doctype", "Stock Entry")
-            return f"{doctype_name} creation cancelled."
-        
-        if stage == "item_selection":
-            # Handle item selection
-            selected_item = None
-            
-            if user_input.isdigit():
-                try:
-                    num = int(user_input)
-                    if 1 <= num <= len(numbered_options):
-                        selected_item = numbered_options[num - 1]
-                    else:
-                        return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
-                except ValueError:
-                    return f"❌ Invalid input. Please use numbers or type the item code."
-            else:
-                # User typed item code or name
-                selected_item = user_input
-            
-            # Store selected item and move to quantity
-            current_item["item_code"] = selected_item
-            
-            # Update state for quantity input
-            state.update({
-                "stage": "quantity_input",
-                "current_item": current_item
-            })
-            set_conversation_state(user, state)
-            
-            return f"📦 **Item:** {selected_item}\n\n💯 **Enter Quantity** (default: 1):\n• Type a number (e.g., `5`, `10.5`)\n• Press Enter for default (1)"
-        
-        elif stage == "quantity_input":
-            # Handle quantity input
-            if user_input == "":
-                quantity = 1
-            else:
-                try:
-                    quantity = float(user_input)
-                    if quantity <= 0:
-                        return "❌ Quantity must be greater than 0. Please enter a valid quantity."
-                except ValueError:
-                    return "❌ Invalid quantity. Please enter a number (e.g., 5, 10.5) or press Enter for default (1)."
-            
-            current_item["qty"] = quantity
-            
-            # Update state for rate input
-            state.update({
-                "stage": "rate_input",
-                "current_item": current_item
-            })
-            set_conversation_state(user, state)
-            
-            return f"📦 **Item:** {current_item['item_code']}\n💯 **Quantity:** {quantity}\n\n💰 **Enter Basic Rate** (default: 0):\n• Type a number (e.g., `100`, `25.50`)\n• Press Enter for default (0)"
-        
-        elif stage == "rate_input":
-            # Handle rate input
-            if user_input == "":
-                rate = 0
-            else:
-                try:
-                    rate = float(user_input)
-                    if rate < 0:
-                        return "❌ Rate cannot be negative. Please enter a valid rate."
-                except ValueError:
-                    return "❌ Invalid rate. Please enter a number (e.g., 100, 25.50) or press Enter for default (0)."
-            
-            current_item["basic_rate"] = rate
-            
-            # Set source warehouse from data
-            current_item["s_warehouse"] = data.get("from_warehouse") or data.get("s_warehouse")
-            
-            if needs_target_warehouse:
-                # Move to target warehouse selection
-                state.update({
-                    "stage": "target_warehouse",
-                    "current_item": current_item
-                })
-                set_conversation_state(user, state)
-                
-                return show_target_warehouse_selection(current_item, state, user)
-            else:
-                # No target warehouse needed, finalize item
-                return finalize_current_item(current_item, state, user)
-        
-        elif stage == "target_warehouse":
-            # Handle target warehouse selection
-            selected_warehouse = None
-            
-            if user_input.isdigit():
-                try:
-                    warehouse_options = state.get("warehouse_options", [])
-                    num = int(user_input)
-                    if 1 <= num <= len(warehouse_options):
-                        selected_warehouse = warehouse_options[num - 1]
-                    else:
-                        return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(warehouse_options)}."
-                except ValueError:
-                    return f"❌ Invalid input. Please use numbers or type the warehouse name."
-            else:
-                # User typed warehouse name
-                selected_warehouse = user_input
-            
-            current_item["t_warehouse"] = selected_warehouse
-            
-            # Finalize item
-            return finalize_current_item(current_item, state, user)
-        
-        elif stage == "add_more_items":
-            # Handle add more items decision
-            if user_input.lower() in ['yes', 'y', '1', 'add', 'more']:
-                # Reset for new item
-                state.update({
-                    "stage": "item_selection",
-                    "current_item": {}
-                })
-                set_conversation_state(user, state)
-                
-                return show_items_selection(data, state.get("missing_fields", []), user)
-            else:
-                # Done adding items, create the stock entry
-                return create_stock_entry_with_items(data, items_list, user)
-        
-        else:
-            clear_conversation_state(user)
-            return "Error in item collection process. Please start over."
-            
-    except Exception as e:
-        clear_conversation_state(user)
-        return f"Error processing item details: {str(e)}"
-
-def show_target_warehouse_selection(current_item, state, user):
-    """Show target warehouse selection for current item"""
-    try:
-        # Get available warehouses
-        warehouses = frappe.get_all("Warehouse", 
-                                  fields=["name", "warehouse_name"],
-                                  order_by="name",
-                                  limit=10)
-        
-        response_parts = [
-            f"📦 **Item:** {current_item['item_code']}",
-            f"💯 **Quantity:** {current_item['qty']}",
-            f"💰 **Rate:** {current_item['basic_rate']}\n",
-            "🏪 **Select Target Warehouse:**\n"
-        ]
-        
-        warehouse_names = []
-        for i, warehouse in enumerate(warehouses, 1):
-            warehouse_display = warehouse.name
-            if warehouse.warehouse_name and warehouse.warehouse_name != warehouse.name:
-                warehouse_display += f" ({warehouse.warehouse_name})"
-            response_parts.append(f"`{i}` **{warehouse_display}**")
-            warehouse_names.append(warehouse.name)
-        
-        response_parts.extend([
-            "",
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `2`) for your choice",
-            "• Type the **warehouse name** directly"
-        ])
-        
-        # Update state with warehouse options
-        state["warehouse_options"] = warehouse_names
-        set_conversation_state(user, state)
-        
-        return "\n".join(response_parts)
-        
-    except Exception as e:
-        return f"Error showing target warehouse selection: {str(e)}"
-
-def finalize_current_item(current_item, state, user):
-    """Finalize current item and ask if user wants to add more"""
-    try:
-        items_list = state.get("items_list", [])
-        items_list.append(current_item.copy())
-        
-        # Show summary of added item
-        response_parts = [
-            "✅ **Item Added Successfully!**\n",
-            f"📦 **Item:** {current_item['item_code']}",
-            f"💯 **Quantity:** {current_item['qty']}",
-            f"💰 **Rate:** {current_item['basic_rate']}",
-            f"🏪 **From:** {current_item.get('s_warehouse', 'N/A')}"
-        ]
-        
-        if current_item.get('t_warehouse'):
-            response_parts.append(f"🏪 **To:** {current_item['t_warehouse']}")
-        
-        response_parts.extend([
-            f"\n📋 **Total Items Added:** {len(items_list)}",
-            "",
-            "🔄 **Add Another Item?**",
-            "• Type `yes` to add another item",
-            "• Type `no` to create the Stock Entry",
-            "• Type `done` to finish"
-        ])
-        
-        # Update state
-        state.update({
-            "stage": "add_more_items",
-            "items_list": items_list,
-            "current_item": {}
-        })
-        set_conversation_state(user, state)
-        
-        return "\n".join(response_parts)
-        
-    except Exception as e:
-        return f"Error finalizing item: {str(e)}"
-
-def create_stock_entry_with_items(data, items_list, user):
-    """Create the Stock Entry with all collected items"""
-    try:
-        if not items_list:
-            clear_conversation_state(user)
-            return "❌ No items added. Stock Entry creation cancelled."
-        
-        # Add items to data
-        data["items_list"] = items_list
-        
-        # Clear conversation state
-        clear_conversation_state(user)
-        
-        # Create the stock entry
-        return create_document("Stock Entry", data, user)
-        
-    except Exception as e:
-        clear_conversation_state(user)
-        return f"Error creating Stock Entry: {str(e)}"
+# handle_item_details_collection and related functions removed - replaced by generic child table system
 
 def get_intent_from_gemini(user_input, user):
     """Use Gemini to understand user intent and convert to structured data"""
@@ -1221,9 +1823,10 @@ def execute_task(task_json, user):
     action = task_json.get("action")
     doctype = task_json.get("doctype")
     
-    # CRITICAL DEBUG: Log what Gemini detected
+    # CRITICAL DEBUG: Log what Gemini detected (truncated to avoid char limit)
     try:
-        frappe.log_error(f"Gemini detected - Action: {action}, Doctype: {doctype}, Full JSON: {task_json}", "Gemini Detection Debug")
+        json_summary = f"{len(task_json)} keys" if task_json else "empty"
+        frappe.log_error(f"Gemini - Action: {action}, Doctype: {doctype}, JSON: {json_summary}", "Gemini Debug")
     except:
         pass
     
@@ -1285,10 +1888,6 @@ def handle_create_action(doctype, task_json, user):
     """Handle document creation"""
     try:
         # CRITICAL FIX: Ensure doctype is properly preserved from the start
-        try:
-            frappe.log_error(f"handle_create_action called with doctype: {doctype}", "Create Action Debug")
-        except:
-            pass
             
         # Get required fields for the doctype
         meta = frappe.get_meta(doctype)
@@ -1301,6 +1900,9 @@ def handle_create_action(doctype, task_json, user):
                     # For Stock Entry, skip series as it's auto-generated
                     if doctype == "Stock Entry" and df.fieldname == "naming_series":
                         continue
+                    # CRITICAL FIX: Skip child table fields - they are handled separately
+                    if df.fieldtype == "Table":
+                        continue
                     required_fields.append(df.fieldname)
 
         data = task_json.get("data", {})
@@ -1308,8 +1910,30 @@ def handle_create_action(doctype, task_json, user):
         
         for field in required_fields:
             field_obj = meta.get_field(field)
-            if field not in data and not field_obj.default:
-                missing_fields.append(field)
+            if field not in data:
+                if field_obj.default:
+                    # Set the default value in data instead of adding to missing_fields
+                    if field_obj.default == "Today":
+                        from datetime import date
+                        data[field] = date.today().strftime("%Y-%m-%d")
+                    else:
+                        data[field] = field_obj.default
+                else:
+                    missing_fields.append(field)
+        
+        # Get required child tables for the doctype
+        required_child_tables = get_required_child_tables(doctype)
+        missing_child_tables = []
+        
+        for child_table in required_child_tables:
+            if child_table not in data or not data[child_table]:
+                missing_child_tables.append(child_table)
+        
+        # Debug: Log child table status
+        try:
+            frappe.log_error(f"Child tables for {doctype}: required={required_child_tables}, missing={missing_child_tables}", "Child Table Status")
+        except:
+            pass
         
         # For Asset doctype, also check for conditionally mandatory fields
         if doctype == "Asset":
@@ -1322,42 +1946,53 @@ def handle_create_action(doctype, task_json, user):
             if "company" not in data and "company" not in missing_fields:
                 missing_fields.append("company")
 
-        if missing_fields:
+        if missing_fields or missing_child_tables:
             
             # Special handling for Stock Entry - ALWAYS show type selection first
             if doctype == "Stock Entry":
                 return show_stock_entry_type_selection(data, missing_fields, user)
             
-            # For all other doctypes, use smart field selection system with proper doctype context
-            field_to_ask = missing_fields[0]
-            
-            # Check if field exists in meta
-            try:
-                field_obj = meta.get_field(field_to_ask)
-            except Exception as field_error:
-                field_obj = None
-            
-            if field_obj:
-                # Use smart field selection for all doctypes - CRITICAL: Pass the original doctype
-                return get_smart_field_selection(field_to_ask, field_obj, data, missing_fields, user, doctype)
-            else:
-                # Fallback if field not found in metadata
-                label_to_ask = field_to_ask.replace("_", " ").title()
+            # Handle regular fields first, then child tables
+            if missing_fields:
+                field_to_ask = missing_fields[0]
                 
-                # Save the current state with EXPLICIT doctype - CRITICAL FIX
-                state = {
-                    "action": "collect_stock_selection",  # Use stock_selection for consistency
-                    "selection_type": field_to_ask,
-                    "doctype": doctype,  # CRITICAL: Preserve original doctype explicitly
-                    "data": data,
-                    "missing_fields": missing_fields,
-                    "numbered_options": []
-                }
-                set_conversation_state(user, state)
+                # Check if field exists in meta
+                try:
+                    field_obj = meta.get_field(field_to_ask)
+                except Exception as field_error:
+                    field_obj = None
                 
-                return f"I can create a {doctype} for you! What should I set as the {label_to_ask}?"
+                if field_obj:
+                    # Use smart field selection for all doctypes - CRITICAL: Pass the original doctype
+                    return get_smart_field_selection(field_to_ask, field_obj, data, missing_fields, user, doctype)
+                else:
+                    # Fallback if field not found in metadata
+                    label_to_ask = field_to_ask.replace("_", " ").title()
+                    
+                    # Save the current state with EXPLICIT doctype - CRITICAL FIX
+                    state = {
+                        "action": "collect_stock_selection",  # Use stock_selection for consistency
+                        "selection_type": field_to_ask,
+                        "doctype": doctype,  # CRITICAL: Preserve original doctype explicitly
+                        "data": data,
+                        "missing_fields": missing_fields,
+                        "numbered_options": []
+                    }
+                    set_conversation_state(user, state)
+                    
+                    return f"I can create a {doctype} for you! What should I set as the {label_to_ask}?"
+            
+            elif missing_child_tables:
+                # All regular fields collected, now collect child tables
+                child_table_to_collect = missing_child_tables[0]
+                try:
+                    frappe.log_error(f"Transitioning to child table: {child_table_to_collect} for {doctype}", "Child Table Transition")
+                except:
+                    pass
+                return show_child_table_collection(doctype, child_table_to_collect, data, missing_child_tables, user)
+        
         else:
-            # All required fields are present, create the document
+            # All required fields and child tables are present, create the document
             return create_document(doctype, data, user)
             
     except Exception as e:
@@ -1381,125 +2016,31 @@ def create_document(doctype, data, user):
             user_data.pop("email", None)
             doc.update(user_data)
             
-        elif doctype == "Stock Entry":
-            # Special handling for Stock Entry
-            stock_data = data.copy()
-            items_data = stock_data.pop("items", None)
-            items_list = stock_data.pop("items_list", None)  # New comprehensive items list
-            
-            # Update basic fields first
-            doc.update(stock_data)
-            
-            # Handle comprehensive items list (new system)
-            if items_list:
-                for item_data in items_list:
-                    # Create item if it doesn't exist
-                    item_code = item_data.get("item_code")
-                    if item_code and not frappe.db.exists("Item", item_code):
-                        try:
-                            new_item = frappe.new_doc("Item")
-                            new_item.item_code = item_code
-                            new_item.item_name = item_code
-                            new_item.item_group = "All Item Groups"
-                            new_item.stock_uom = "Nos"
-                            new_item.insert()
-                            frappe.db.commit()
-                        except Exception as item_error:
-                            clear_conversation_state(user)
-                            return f"Could not create item '{item_code}': {str(item_error)}. Please create the item first or use an existing item code."
-                    
-                    # Add item to stock entry with all details
-                    doc.append("items", {
-                        "item_code": item_data.get("item_code"),
-                        "qty": item_data.get("qty", 1),
-                        "basic_rate": item_data.get("basic_rate", 0),
-                        "s_warehouse": item_data.get("s_warehouse"),
-                        "t_warehouse": item_data.get("t_warehouse")
-                    })
-            
-            # Handle legacy items data (fallback for old system)
-            elif items_data:
-                if isinstance(items_data, str):
-                    # If items is a string, treat it as an item code
-                    item_code = items_data
-                    
-                    # Determine warehouses based on stock entry type and available data
-                    stock_entry_type = stock_data.get("stock_entry_type") or stock_data.get("purpose", "Material Receipt")
-                    s_warehouse = stock_data.get("from_warehouse") or stock_data.get("s_warehouse")
-                    t_warehouse = stock_data.get("to_warehouse") or stock_data.get("t_warehouse")
-                    
-                    # Get default warehouse from system if none provided
-                    if not s_warehouse and not t_warehouse:
-                        try:
-                            default_warehouses = frappe.get_all("Warehouse", limit=1, fields=["name"])
-                            default_warehouse = default_warehouses[0].name if default_warehouses else None
-                        except:
-                            default_warehouse = None
-                    
-                    # Set warehouses based on stock entry type
-                    if stock_entry_type in ["Material Issue", "Material Transfer", "Send to Subcontractor"]:
-                        # These types need source warehouse
-                        if not s_warehouse:
-                            s_warehouse = default_warehouse or "Stores"
-                    elif stock_entry_type in ["Material Receipt"]:
-                        # Material Receipt needs target warehouse
-                        if not t_warehouse:
-                            t_warehouse = default_warehouse or "Stores"
-                    elif stock_entry_type in ["Material Transfer for Manufacture", "Manufacture"]:
-                        # These may need both warehouses
-                        if not s_warehouse:
-                            s_warehouse = default_warehouse or "Stores"
-                        if not t_warehouse:
-                            t_warehouse = default_warehouse or "Finished Goods"
-                    
-                    # Check if item exists
-                    if frappe.db.exists("Item", item_code):
-                        doc.append("items", {
-                            "item_code": item_code,
-                            "qty": 1,  # Default quantity
-                            "basic_rate": 0,  # Default rate
-                            "s_warehouse": s_warehouse,
-                            "t_warehouse": t_warehouse
-                        })
-                    else:
-                        # Create a simple item if it doesn't exist
-                        try:
-                            new_item = frappe.new_doc("Item")
-                            new_item.item_code = item_code
-                            new_item.item_name = item_code
-                            new_item.item_group = "All Item Groups"  # Default item group
-                            new_item.stock_uom = "Nos"  # Default UOM
-                            new_item.insert()
-                            frappe.db.commit()
-                            
-                            # Now add to stock entry
-                            doc.append("items", {
-                                "item_code": item_code,
-                                "qty": 1,
-                                "basic_rate": 0,
-                                "s_warehouse": s_warehouse,
-                                "t_warehouse": t_warehouse
-                            })
-                        except Exception as item_error:
-                            clear_conversation_state(user)
-                            return f"Could not create item '{item_code}': {str(item_error)}. Please create the item first or use an existing item code."
-                            
-                elif isinstance(items_data, list):
-                    # If items is a list, add each item
-                    for item in items_data:
-                        if isinstance(item, dict):
-                            doc.append("items", item)
-                        else:
-                            doc.append("items", {
-                                "item_code": str(item),
-                                "qty": 1,
-                                "basic_rate": 0,
-                                "s_warehouse": stock_data.get("from_warehouse"),
-                                "t_warehouse": stock_data.get("to_warehouse")
-                            })
+        # Stock Entry hardcoded logic removed - now handled by generic child table system
         else:
             # Default handling for other doctypes
-            doc.update(data)
+            # Separate child table data from regular field data
+            regular_data = {}
+            child_table_data = {}
+            
+            for field_name, field_value in data.items():
+                # Check if this is a child table field
+                meta = frappe.get_meta(doctype)
+                field_def = meta.get_field(field_name)
+                
+                if field_def and field_def.fieldtype == "Table":
+                    child_table_data[field_name] = field_value
+                else:
+                    regular_data[field_name] = field_value
+            
+            # Update regular fields first
+            doc.update(regular_data)
+            
+            # Add child table rows
+            for table_field, rows in child_table_data.items():
+                if isinstance(rows, list):
+                    for row_data in rows:
+                        doc.append(table_field, row_data)
         
         # Insert the document
         doc.insert()
@@ -2401,92 +2942,7 @@ def show_company_selection(data, missing_fields, user, current_doctype=None):
     except Exception as e:
         return f"Error showing company selection: {str(e)}"
 
-def show_items_selection(data, missing_fields, user):
-    """Show interactive selection for Items with comprehensive details"""
-    try:
-        # Get available items
-        items = frappe.get_all("Item", 
-                             fields=["item_code", "item_name"],
-                             order_by="item_code")
-        
-        # Check if we need target warehouse for this stock entry type
-        stock_entry_type = data.get("stock_entry_type") or data.get("purpose", "")
-        needs_target_warehouse = stock_entry_type in ["Material Receipt", "Material Transfer", "Material Transfer for Manufacture", "Manufacture"]
-        
-        response_parts = [
-            "📦 **Add Item to Stock Entry:**\n"
-        ]
-        
-        if items:
-            response_parts.append("**📦 Available Items:**")
-            item_codes = []
-            # Unicode circled numbers for beautiful badges
-            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
-            
-            for i, item in enumerate(items, 1):
-                item_display = f"**{item.item_code}**"
-                if item.item_name and item.item_name != item.item_code:
-                    item_display += f" - _{item.item_name}_"
-                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
-                response_parts.append(f"{badge} {item_display}")
-                item_codes.append(item.item_code)
-            
-            response_parts.extend([
-                "",
-                f"📊 **Total Items:** {len(items)}",
-                "",
-                "**💡 How to select:**",
-                "• Type a **number** (e.g., `1`) for your choice",
-                "• Type an **item code** directly",
-                "• Type a **new item name** to create it",
-                "• Type `cancel` to cancel",
-                "",
-                "**📝 Examples:**",
-                f"• `1` → {items[0].item_code if items else 'First Item'}",
-                f"• `{items[0].item_code if items else 'ITEM-001'}` → By item code",
-                "• `New Widget` → Create new item"
-            ])
-        else:
-            response_parts.extend([
-                "**ℹ️ No items found in system.**",
-                "",
-                "**💡 How to select:**",
-                "• Type an **item code** or **new item name**",
-                "• Type `cancel` to cancel",
-                "",
-                "**📝 Note:** If the item doesn't exist, I'll help you create it."
-            ])
-            item_codes = []
-        
-        # Show what we'll collect next
-        response_parts.extend([
-            "**📋 After selecting item, I'll ask for:**",
-            "• Quantity (default: 1)",
-            "• Basic Rate (default: 0)"
-        ])
-        
-        if needs_target_warehouse:
-            response_parts.append("• Target Warehouse")
-        
-        response_parts.append(f"\n**Current Stock Entry Type:** {stock_entry_type}")
-        
-        # Save state for item entry
-        state = {
-            "action": "collect_item_details",
-            "stage": "item_selection",
-            "data": data,
-            "missing_fields": missing_fields,
-            "numbered_options": item_codes,
-            "current_item": {},
-            "needs_target_warehouse": needs_target_warehouse,
-            "items_list": data.get("items_list", [])
-        }
-        set_conversation_state(user, state)
-        
-        return "\n".join(response_parts)
-        
-    except Exception as e:
-        return f"Error showing items selection: {str(e)}"
+# show_items_selection function removed - replaced by generic child table system
 
 def show_warehouse_selection(field_name, data, missing_fields, user):
     """Show interactive selection for Warehouse fields"""
@@ -3318,442 +3774,73 @@ def get_smart_field_selection(field_name, field_obj, data, missing_fields, user,
     except Exception as e:
         return f"Error creating smart field selection for {field_name}: {str(e)}"
 
-def show_transaction_items_selection(doctype, data, missing_fields, user):
-    """Show interactive selection for Items in transaction documents (Purchase Order, Sales Order, etc.)"""
-    try:
-        # Get available items
-        items = frappe.get_all("Item", 
-                             fields=["item_code", "item_name", "standard_rate"],
-                             order_by="item_code")
-        
-        # Create appropriate icons and labels based on doctype
-        icons = {
-            "Purchase Order": "🛒",
-            "Sales Order": "📊", 
-            "Purchase Invoice": "📄",
-            "Sales Invoice": "🧾",
-            "Quotation": "📝"
-        }
-        icon = icons.get(doctype, "📦")
-        
-        response_parts = [
-            f"{icon} **Add Item to {doctype}:**\n"
-        ]
-        
-        if items:
-            response_parts.append("**📦 Available Items:**")
-            total_items = len(items)
-            
-            # Unicode circled numbers for beautiful badges
-            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
-            
-            # Always use single column with better formatting
-            for i, item in enumerate(items, 1):
-                item_display = f"**{item.item_code}**"
-                if item.item_name and item.item_name != item.item_code:
-                    item_display += f" - _{item.item_name}_"
-                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
-                response_parts.append(f"{badge} {item_display}")
-            
-            response_parts.append("")
-            
-            item_codes = [item.item_code for item in items]
-            
-            # Show what fields will be collected based on doctype
-            fields_to_collect = []
-            if doctype == "Purchase Order":
-                fields_to_collect = [
-                    "• Quantity (default: 1)",
-                    "• Required By Date (mandatory)",
-                    "• Rate (will fetch standard rate if available)",
-                    "• UOM (auto-filled from item)"
-                ]
-            elif doctype == "Purchase Invoice":
-                fields_to_collect = [
-                    "• Accepted Qty (mandatory)",
-                    "• Rate (auto-filled from item/supplier rates)",
-                    "• UOM (auto-filled from item)"
-                ]
-            else:
-                fields_to_collect = [
-                    "• Quantity (default: 1)",
-                    "• Rate (will fetch standard rate if available)"
-                ]
-            
-            response_parts.extend([
-                f"📊 **Total Items:** {total_items}",
-                "",
-                "**💡 How to select:**",
-                "• Type a **number** (e.g., `1`) for your choice",
-                "• Type the **item code** directly",
-                "• Type `cancel` to cancel",
-                "",
-                f"**📋 After selecting item, I'll ask for:**"
-            ])
-            response_parts.extend([f"• {field}" for field in fields_to_collect])
-            response_parts.extend([
-                f"• Then create the {doctype}",
-                "",
-                "**📝 Examples:**",
-                f"• `1` → {items[0].item_code if items else 'First Item'}",
-                f"• `{items[0].item_code if items else 'ITEM-001'}` → By item code"
-            ])
-        else:
-            response_parts.extend([
-                "**ℹ️ No items found in system.**",
-                "",
-                "**💡 How to select:**",
-                "• Type an **item code** directly",
-                "• Type `cancel` to cancel",
-                "",
-                "**📝 Note:** If the item doesn't exist, I'll help you create it."
-            ])
-            item_codes = []
-        
-        # Save state for transaction item collection
-        state = {
-            "action": "collect_transaction_item_details",
-            "stage": "item_selection",
-            "doctype": doctype,
-            "data": data,
-            "missing_fields": missing_fields,
-            "numbered_options": item_codes,
-            "current_item": {},
-            "items_list": data.get("items_list", [])
-        }
-        set_conversation_state(user, state)
-        
-        return "\n".join(response_parts)
-        
-    except Exception as e:
-        return f"Error showing {doctype} items selection: {str(e)}"
+# show_transaction_items_selection and related transaction functions removed - replaced by generic child table system
 
-def handle_transaction_item_details_collection(message, state, user):
-    """Handle item details collection for transaction documents"""
+def handle_child_table_field_input(message, state, user):
+    """Handle input for child table fields with enhanced numbered options"""
     try:
-        stage = state.get("stage", "item_selection")
-        doctype = state.get("doctype", "Purchase Order")
-        data = state.get("data", {})
-        current_item = state.get("current_item", {})
-        items_list = state.get("items_list", [])
-        numbered_options = state.get("numbered_options", [])
         user_input = message.strip()
         
-        # Handle cancel
+        # Handle cancel at any stage
         if user_input.lower() in ['cancel', 'quit', 'exit']:
             clear_conversation_state(user)
+            doctype = state.get("doctype", "Document")
             return f"{doctype} creation cancelled."
         
-        if stage == "item_selection":
-            # Handle item selection
-            selected_item = None
-            
-            if user_input.isdigit():
-                try:
-                    num = int(user_input)
-                    if 1 <= num <= len(numbered_options):
-                        selected_item = numbered_options[num - 1]
-                    else:
-                        return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
-                except ValueError:
-                    return f"❌ Invalid input. Please use numbers or type the item code."
-            else:
-                # User typed item code or name
-                selected_item = user_input
-            
-            # Check if item exists and get its details
-            item_doc = None
-            if frappe.db.exists("Item", selected_item):
-                item_doc = frappe.get_doc("Item", selected_item)
-            
-            # Store selected item and move to quantity
-            current_item["item_code"] = selected_item
-            current_item["item_name"] = item_doc.item_name if item_doc else selected_item
-            current_item["rate"] = item_doc.standard_rate if item_doc and item_doc.standard_rate else 0
-            # Set default UOM from item
-            current_item["uom"] = item_doc.stock_uom if item_doc and item_doc.stock_uom else "Nos"
-            current_item["stock_uom"] = item_doc.stock_uom if item_doc and item_doc.stock_uom else "Nos"
-            
-            # Update state for quantity input
-            state.update({
-                "stage": "quantity_input",
-                "current_item": current_item
-            })
-            set_conversation_state(user, state)
-            
-            # Show different quantity prompt based on doctype
-            if doctype == "Purchase Invoice":
-                return f"📦 **Item:** {selected_item}\n\n💯 **Enter Accepted Qty** (default: 1):\n💡 **How to enter:** Type a number (e.g., `5`, `10.5`) or press Enter for default"
-            else:
-                return f"📦 **Item:** {selected_item}\n\n💯 **Enter Quantity** (default: 1):\n💡 **How to enter:** Type a number (e.g., `5`, `10.5`) or press Enter for default"
+        # Get the child table state and field info
+        child_table_data = state.get("child_table_data", {})
+        field_info = state.get("field_info", {})
+        numbered_options = state.get("numbered_options", [])
         
-        elif stage == "quantity_input":
-            # Handle quantity input
-            if user_input == "":
-                quantity = 1
-            else:
-                try:
-                    quantity = float(user_input)
-                    if quantity <= 0:
-                        return "❌ Quantity must be greater than 0. Please enter a valid quantity."
-                except ValueError:
-                    return "❌ Invalid quantity. Please enter a number (e.g., 5, 10.5) or press Enter for default (1)."
-            
-            current_item["qty"] = quantity
-            
-            # For Purchase Invoice, skip Required By date and rate (auto-filled) - go directly to summary
-            if doctype == "Purchase Invoice":
-                # Set a default rate of 0 (will be auto-filled by ERPNext)
-                current_item["rate"] = 0
-                current_item["amount"] = 0  # Will be calculated by ERPNext
-                
-                # Add item to items list
-                items_list.append(current_item.copy())
-                
-                # Show summary and ask if user wants to add more items
-                response_parts = [
-                    "✅ **Item Added Successfully!**",
-                    "",
-                    f"📦 **Item:** {current_item['item_code']}",
-                    f"💯 **Accepted Qty:** {current_item['qty']}",
-                    f"📏 **UOM:** {current_item.get('uom', 'Nos')}",
-                    f"💰 **Rate:** Auto-filled from item/supplier rates",
-                    f"",
-                    f"📋 **Total Items Added:** {len(items_list)}",
-                    "",
-                    "🔄 **Add Another Item?**",
-                    f"• Type `yes` to add another item to {doctype}",
-                    f"• Type `no` to create the {doctype}",
-                    "• Type `done` to finish"
-                ]
-                
-                # Update state
-                state.update({
-                    "stage": "add_more_items",
-                    "items_list": items_list,
-                    "current_item": {}
-                })
-                set_conversation_state(user, state)
-                
-                return "\n".join(response_parts)
-            
-            # For Purchase Order, collect Required By date next
-            elif doctype == "Purchase Order":
-                state.update({
-                    "stage": "required_by_input",
-                    "current_item": current_item
-                })
-                set_conversation_state(user, state)
-                
-                # Show Required By date selection
-                from datetime import date, timedelta
-                today = date.today()
-                week_later = today + timedelta(days=7)
-                month_later = today + timedelta(days=30)
-                
-                return f"📦 **Item:** {current_item['item_code']}\n💯 **Quantity:** {quantity}\n\n📅 **Enter Required By Date:**\n\n**Quick Options:**\n  `1` Next Week ({week_later.strftime('%Y-%m-%d')})\n  `2` Next Month ({month_later.strftime('%Y-%m-%d')})\n\n💡 **How to enter:** Type `1` or `2` for quick options, or enter date as YYYY-MM-DD (e.g., `2024-12-31`)"
-            else:
-                # For other doctypes, go directly to rate input
-                state.update({
-                    "stage": "rate_input",
-                    "current_item": current_item
-                })
-                set_conversation_state(user, state)
-                
-                suggested_rate = current_item.get("rate", 0)
-                return f"📦 **Item:** {current_item['item_code']}\n💯 **Quantity:** {quantity}\n\n💰 **Enter Rate** (suggested: {suggested_rate}):\n💡 **How to enter:** Type a number (e.g., `100`, `25.50`) or press Enter for suggested rate"
+        fieldname = field_info["fieldname"]
+        fieldtype = field_info["fieldtype"]
+        field_label = field_info["label"]
         
-        elif stage == "required_by_input":
-            # Handle Required By date input for Purchase Order
-            from datetime import date, timedelta, datetime
-            
-            selected_date = None
-            today = date.today()
-            week_later = today + timedelta(days=7)
-            month_later = today + timedelta(days=30)
-            
-            if user_input == "1":
-                selected_date = week_later.strftime("%Y-%m-%d")
-            elif user_input == "2":
-                selected_date = month_later.strftime("%Y-%m-%d")
-            else:
-                # Validate date format
-                import re
-                if re.match(r'^\d{4}-\d{2}-\d{2}$', user_input):
-                    try:
-                        # Validate the date and ensure it's not in the past
-                        input_date = datetime.strptime(user_input, '%Y-%m-%d').date()
-                        if input_date < today:
-                            return "❌ Required By date cannot be in the past. Please enter a future date."
-                        selected_date = user_input
-                    except ValueError:
-                        return "❌ Invalid date. Please use YYYY-MM-DD format (e.g., 2024-12-31) or select option 1 or 2."
+        selected_value = None
+        
+        # Handle numbered options first (for Link, Select, Date fields)
+        if numbered_options and user_input.isdigit():
+            try:
+                num = int(user_input)
+                if 1 <= num <= len(numbered_options):
+                    selected_value = numbered_options[num - 1]
                 else:
-                    return "❌ Invalid date format. Please use YYYY-MM-DD format (e.g., 2024-12-31) or select option 1 or 2."
-            
-            current_item["schedule_date"] = selected_date
-            
-            # Move to rate input
-            state.update({
-                "stage": "rate_input",
-                "current_item": current_item
-            })
-            set_conversation_state(user, state)
-            
-            suggested_rate = current_item.get("rate", 0)
-            return f"📦 **Item:** {current_item['item_code']}\n💯 **Quantity:** {current_item['qty']}\n📅 **Required By:** {selected_date}\n\n💰 **Enter Rate** (suggested: {suggested_rate}):\n💡 **How to enter:** Type a number (e.g., `100`, `25.50`) or press Enter for suggested rate"
-        
-        elif stage == "rate_input":
-            # Handle rate input
-            if user_input == "":
-                rate = current_item.get("rate", 0)
-            else:
-                try:
-                    rate = float(user_input)
-                    if rate < 0:
-                        return "❌ Rate cannot be negative. Please enter a valid rate."
-                except ValueError:
-                    return "❌ Invalid rate. Please enter a number (e.g., 100, 25.50) or press Enter for suggested rate."
-            
-            current_item["rate"] = rate
-            
-            # Calculate amount
-            amount = current_item["qty"] * rate
-            current_item["amount"] = amount
-            
-            # Add item to items list
-            items_list.append(current_item.copy())
-            
-            # Show summary and ask if user wants to add more items
-            response_parts = [
-                "✅ **Item Added Successfully!**",
-                "",
-                f"📦 **Item:** {current_item['item_code']}",
-                f"💯 **Quantity:** {current_item['qty']}",
-                f"💰 **Rate:** {current_item['rate']}",
-                f"💵 **Amount:** {amount}"
-            ]
-            
-            # Show Required By date for Purchase Orders
-            if doctype == "Purchase Order" and current_item.get("schedule_date"):
-                response_parts.append(f"📅 **Required By:** {current_item['schedule_date']}")
-            
-            # Show UOM if available
-            if current_item.get("uom"):
-                response_parts.append(f"📏 **UOM:** {current_item['uom']}")
-            
-            response_parts.extend([
-                f"",
-                f"📋 **Total Items Added:** {len(items_list)}",
-                "",
-                "🔄 **Add Another Item?**",
-                f"• Type `yes` to add another item to {doctype}",
-                f"• Type `no` to create the {doctype}",
-                "• Type `done` to finish"
-            ])
-            
-            # Update state
-            state.update({
-                "stage": "add_more_items",
-                "items_list": items_list,
-                "current_item": {}
-            })
-            set_conversation_state(user, state)
-            
-            return "\n".join(response_parts)
-        
-        elif stage == "add_more_items":
-            # Handle add more items decision
-            if user_input.lower() in ['yes', 'y', '1', 'add', 'more']:
-                # Reset for new item
-                state.update({
-                    "stage": "item_selection",
-                    "current_item": {}
-                })
-                set_conversation_state(user, state)
-                
-                return show_transaction_items_selection(doctype, data, state.get("missing_fields", []), user)
-            else:
-                # Done adding items, create the document
-                return create_transaction_document_with_items(doctype, data, items_list, user)
-        
+                    return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
+            except ValueError:
+                return f"❌ Invalid input. Please use numbers or direct input."
         else:
-            clear_conversation_state(user)
-            return f"Error in {doctype} item collection process. Please start over."
+            # Handle direct input or non-numeric fields
+            try:
+                # Use the existing validation function
+                selected_value = validate_field_input(user_input, field_info)
+            except ValueError as e:
+                # Show error and ask again with appropriate interface
+                return f"❌ {str(e)}\n\nPlease try again or type `cancel` to cancel."
+        
+        # If we got a valid value, update the child table data
+        if selected_value is not None:
+            current_row = child_table_data.get("current_row", {})
+            current_row[fieldname] = selected_value
+            
+            # Move to next field
+            current_field_index = child_table_data.get("current_field_index", 0)
+            child_table_data["current_row"] = current_row
+            child_table_data["current_field_index"] = current_field_index + 1
+            
+            # Update the original child table state
+            state["child_table_data"] = child_table_data
+            
+            # Continue with the original child table collection flow
+            child_table_data["stage"] = "collect_field"
+            set_conversation_state(user, child_table_data)
+            
+            return start_child_field_collection(child_table_data, user)
+        else:
+            return "❌ Invalid input. Please try again or type `cancel` to cancel."
             
     except Exception as e:
         clear_conversation_state(user)
-        return f"Error processing {doctype} item details: {str(e)}"
-
-def create_transaction_document_with_items(doctype, data, items_list, user):
-    """Create transaction document with collected items"""
-    try:
-        if not items_list:
-            clear_conversation_state(user)
-            return f"❌ No items added. {doctype} creation cancelled."
-        
-        # Add items to data in the correct format for transaction documents
-        data["items"] = []
-        for item in items_list:
-            # Create proper item entry for transaction documents
-            item_entry = {
-                "item_code": item["item_code"],
-                "item_name": item.get("item_name", item["item_code"]),
-                "qty": item["qty"],
-                "rate": item["rate"],
-                "amount": item.get("amount", item["qty"] * item["rate"])
-            }
-            
-            # Add UOM and stock_uom (mandatory for Purchase Order)
-            item_entry["uom"] = item.get("uom", "Nos")
-            item_entry["stock_uom"] = item.get("stock_uom", "Nos")
-            
-            # Add schedule_date (Required By) for Purchase Order (mandatory)
-            if doctype == "Purchase Order":
-                item_entry["schedule_date"] = item.get("schedule_date")
-                if not item_entry["schedule_date"]:
-                    # Set default to next week if somehow missing
-                    from datetime import date, timedelta
-                    next_week = date.today() + timedelta(days=7)
-                    item_entry["schedule_date"] = next_week.strftime("%Y-%m-%d")
-            
-            # Add UOM if available from item master
-            if frappe.db.exists("Item", item["item_code"]):
-                try:
-                    item_doc = frappe.get_doc("Item", item["item_code"])
-                    if not item_entry.get("uom"):
-                        item_entry["uom"] = item_doc.stock_uom or "Nos"
-                    if not item_entry.get("stock_uom"):
-                        item_entry["stock_uom"] = item_doc.stock_uom or "Nos"
-                    
-                    # For Purchase documents, include description
-                    if doctype in ["Purchase Order", "Purchase Invoice"]:
-                        item_entry["description"] = item_doc.description or item_doc.item_name
-                except Exception:
-                    # If we can't get item doc, use defaults
-                    pass
-            
-            data["items"].append(item_entry)
-        
-        # Ensure we have transaction_date for Purchase Order (mandatory field)
-        if doctype == "Purchase Order" and "transaction_date" not in data:
-            from datetime import date
-            data["transaction_date"] = date.today().strftime("%Y-%m-%d")
-        
-        # Ensure we have posting_date for Purchase Invoice (mandatory field)  
-        if doctype == "Purchase Invoice" and "posting_date" not in data:
-            from datetime import date
-            data["posting_date"] = date.today().strftime("%Y-%m-%d")
-        
-        # Clear conversation state
-        clear_conversation_state(user)
-        
-        # Create the document
-        return create_document(doctype, data, user)
-        
-    except Exception as e:
-        clear_conversation_state(user)
-        return f"Error creating {doctype}: {str(e)}"
+        return f"Error processing child table field input: {str(e)}"
 
 @frappe.whitelist()
 def clear_user_conversation_state(user_email=None):
