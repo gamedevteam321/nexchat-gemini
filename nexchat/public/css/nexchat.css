@@ -1015,3 +1015,117 @@ document.addEventListener('keydown', function(e) {
 });
 
 */ 
+
+/* Markdown Content Styling */
+.markdown-content {
+    background: white;
+    color: #333;
+    border: 1px solid #e1e5e9;
+    border-bottom-left-radius: 6px;
+    border-radius: 18px;
+    padding: 14px 16px;
+    line-height: 1.6;
+    font-size: 14px;
+    max-width: 85%;
+}
+
+.markdown-content strong {
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.markdown-content em {
+    font-style: italic;
+    color: #4a5568;
+}
+
+.markdown-content code {
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    color: #2d3748;
+    white-space: nowrap;
+}
+
+/* Special styling for different message types based on emojis */
+.markdown-content:has(strong:first-child:contains("🎯")),
+.markdown-content:has(strong:first-child:contains("📋")),
+.markdown-content:has(strong:first-child:contains("💡")) {
+    border-left: 4px solid #667eea;
+    background: #f8f9ff;
+}
+
+/* Unicode circled numbers styling */
+.markdown-content:contains("①"),
+.markdown-content:contains("②"), 
+.markdown-content:contains("③"),
+.markdown-content:contains("④"),
+.markdown-content:contains("⑤"),
+.markdown-content:contains("⑥"),
+.markdown-content:contains("⑦"),
+.markdown-content:contains("⑧"),
+.markdown-content:contains("⑨"),
+.markdown-content:contains("⑩") {
+    border-left: 4px solid #9f7aea;
+    background: #faf5ff;
+}
+
+/* Success message styling */
+.markdown-content:has(strong:first-child:contains("✅")),
+.markdown-content:has(strong:first-child:contains("🎉")) {
+    border-left: 4px solid #48bb78;
+    background: #f0fff4;
+}
+
+/* Error message styling */
+.markdown-content:has(strong:first-child:contains("❌")),
+.markdown-content:has(strong:first-child:contains("💥")) {
+    border-left: 4px solid #f56565;
+    background: #fffaf0;
+}
+
+/* Warning message styling */
+.markdown-content:has(strong:first-child:contains("⚠️")) {
+    border-left: 4px solid #ed8936;
+    background: #fffaf0;
+}
+
+/* Section headers with emojis */
+.markdown-content strong:first-child {
+    display: block;
+    margin-bottom: 8px;
+    color: #2d3748;
+    font-size: 15px;
+}
+
+/* Links and special emphasis */
+.markdown-content strong:contains("💡"),
+.markdown-content strong:contains("📋"),
+.markdown-content strong:contains("🎯"),
+.markdown-content strong:contains("📝") {
+    font-size: 14px;
+    color: #667eea;
+}
+
+/* Override paragraph styling inside markdown content */
+.nexchat-message.bot .markdown-content p {
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    max-width: none;
+    border-radius: 0;
+}
+
+/* Ensure proper spacing in markdown content */
+.markdown-content br {
+    line-height: 1.8;
+}
+
+.markdown-content br + strong {
+    margin-top: 8px;
+    display: inline-block;
+}

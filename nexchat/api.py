@@ -101,7 +101,30 @@ def process_message(message):
         error_msg = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
         full_error = f"Nexchat Error: {error_msg}\nUser: {user}\nMessage: {message}\nTraceback: {traceback.format_exc()}"
         frappe.log_error(full_error, "Nexchat Processing Error")
-        return {"response": f"Sorry, I encountered an error processing your request. Please try again. (Error: {str(e)[:100]})"}
+        # Create beautiful error response with heavy markdown styling
+        error_msg = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
+        response_parts = [
+            "💥 **Nexchat Processing Error**",
+            "*An unexpected error occurred while processing your request*\n",
+            "**🚨 Error Details:**",
+            f"• `{error_msg}`",
+            "",
+            "**💡 What to try:**",
+            "• **Retry:** Try your request again",
+            "• **Rephrase:** Use different wording or approach",
+            "• **Simplify:** Break complex requests into smaller parts",
+            "",
+            "**🔧 Troubleshooting:**",
+            "• Check your request format and spelling",
+            "• Ensure you have proper permissions",
+            "• Try a basic command like 'help' or 'show all customers'",
+            "",
+            "**📞 Support:**",
+            "• Contact your system administrator if the error persists",
+            "• Report this error for system improvement",
+            "• Check ERPNext logs for detailed technical information"
+        ]
+        return {"response": "\n".join(response_parts)}
 
 # --- Generic Child Table Support ---
 def get_required_child_tables(doctype):
@@ -137,7 +160,7 @@ def get_child_table_fields(child_doctype):
             # Add business-critical fields for specific child doctypes
             if child_doctype == "Purchase Order Item" and df.fieldname in ["rate", "warehouse"]:
                 is_required = True
-            elif child_doctype == "Sales Order Item" and df.fieldname in ["rate", "warehouse"]:
+            elif child_doctype == "Sales Order Item" and df.fieldname in ["rate", "warehouse", "delivery_date"]:
                 is_required = True
             
             if is_required:
@@ -357,7 +380,7 @@ def start_child_field_collection(state, user):
         return f"Error starting field collection: {str(e)}"
 
 def show_child_table_link_selection(field_name, field_label, link_doctype, state, user, child_table_label, row_number):
-    """Show numbered options for Link fields in child tables with beautiful HTML"""
+    """Show numbered options for Link fields in child tables with simple text interface"""
     try:
         # Get available records for the link doctype
         records = frappe.get_all(link_doctype, 
@@ -392,306 +415,262 @@ def show_child_table_link_selection(field_name, field_label, link_doctype, state
         if records:
             record_names = [record.name for record in records]
             
-            # Create beautiful HTML structure for child table
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">{child_table_label} Row {row_number} - {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Available {link_doctype}s</span>
-        <span class="nexchat-options-count">{len(records)}</span>
-    </div>
-    
-    <div class="nexchat-options-grid">
-"""
+            # Unicode circled numbers for beautiful badges (purple theme)
+            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
             
+            # Create beautiful response with heavy markdown styling
+            response_parts = [
+                f"{icon} **{child_table_label} Row {row_number} - {field_label}**",
+                f"*Choose from {len(records)} available {link_doctype.lower()}s*\n"
+            ]
+            
+            # Add the beautiful option cards with circled numbers
+            response_parts.append(f"**📋 Available {link_doctype}s:**")
             for i, record in enumerate(records, 1):
                 display_name = record.name
-                secondary_text = ""
                 if display_field and record.get(display_field) and record.get(display_field) != record.name:
-                    secondary_text = record.get(display_field)
-                
-                options_html += f"""
-        <div class="nexchat-option-item" onclick="selectOption('{record.name}')">
-            <div class="nexchat-option-badge">{i}</div>
-            <div class="nexchat-option-content">
-                <div class="nexchat-option-primary">{display_name}</div>
-                {f'<div class="nexchat-option-secondary">{secondary_text}</div>' if secondary_text else ''}
-            </div>
-        </div>
-"""
+                    display_name += f" *({record.get(display_field)})*"
+                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+                response_parts.append(f"{badge} **{display_name}**")
             
-            options_html += """
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for your choice</li>
-            <li>Type the <strong>name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
+            response_parts.extend([
+                "",
+                "**💡 How to select:**",
+                "• Type a **number** (e.g., `3`) for your choice",
+                "• Type the **{} name** directly".format(link_doctype.lower()),
+                "• Type `cancel` to cancel operation",
+                "",
+                "**📝 Quick Examples:**",
+                f"• `1` → Select **{records[0].name}**" if records else "",
+                f"• `{records[0].name}` → Select by exact name" if records else "",
+                "• `cancel` → Cancel this operation",
+                "",
+                f"**🎯 Row {row_number} {link_doctype} Selection:**",
+                f"• **Field:** {field_label}",
+                f"• **Row:** {row_number} in {child_table_label}",
+                f"• **Available:** {len(records)} {link_doctype.lower()}s",
+                f"• **Search:** Type any name for direct selection"
+            ])
+            
+            options_text = "\n".join(response_parts)
         else:
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">{child_table_label} Row {row_number} - {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ No {link_doctype.lower()}s found</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
+            options_text = f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n\nℹ️ No {link_doctype.lower()}s found.\n\n• Type a **name** directly\n• Type `cancel` to cancel"
         
         # Save state for child table field collection
         state["numbered_options"] = record_names
         set_conversation_state(user, state)
         
-        return options_html
+        return options_text
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_child_table_select_selection(field_name, field_label, options, state, user, child_table_label, row_number):
-    """Show numbered options for Select fields in child tables with beautiful HTML"""
+    """Show numbered options for Select fields in child tables with simple text formatting"""
     try:
         # Parse options (they come as newline-separated string)
         option_list = [opt.strip() for opt in options.split('\n') if opt.strip()]
         
         if option_list:
-            # Create beautiful HTML structure for child table
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">⚙️</span>
-        <h4 class="nexchat-field-title">{child_table_label} Row {row_number} - {field_label}</h4>
-        <span class="nexchat-field-type">Select</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Available Options</span>
-        <span class="nexchat-options-count">{len(option_list)}</span>
-    </div>
-    
-    <div class="nexchat-options-grid">
-"""
+            # Unicode circled numbers for beautiful badges (purple theme)
+            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
             
+            # Create beautiful response with heavy markdown styling
+            response_parts = [
+                f"⚙️ **{child_table_label} Row {row_number} - {field_label}**",
+                f"*Choose from {len(option_list)} available options*\n"
+            ]
+            
+            # Add the beautiful option cards with circled numbers
+            response_parts.append("**⚙️ Available Options:**")
             for i, option in enumerate(option_list, 1):
-                options_html += f"""
-        <div class="nexchat-option-item" onclick="selectOption('{option}')">
-            <div class="nexchat-option-badge">{i}</div>
-            <div class="nexchat-option-content">
-                <div class="nexchat-option-primary">{option}</div>
-            </div>
-        </div>
-"""
+                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+                response_parts.append(f"{badge} **{option}**")
             
-            options_html += """
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for your choice</li>
-            <li>Type the <strong>option name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
+            response_parts.extend([
+                "",
+                "**💡 How to select:**",
+                "• Type a **number** (e.g., `3`) for your choice",
+                "• Type the **option name** directly",
+                "• Type `cancel` to cancel operation",
+                "",
+                "**📝 Quick Examples:**",
+                f"• `1` → Select **{option_list[0]}**" if option_list else "",
+                f"• `{option_list[0]}` → Select by exact name" if option_list else "",
+                "• `cancel` → Cancel this operation",
+                "",
+                f"**🎯 Row {row_number} Option Selection:**",
+                f"• **Field:** {field_label}",
+                f"• **Row:** {row_number} in {child_table_label}",
+                f"• **Options:** {len(option_list)} available",
+                f"• **Type:** Select (Dropdown)"
+            ])
+            
+            options_text = "\n".join(response_parts)
         else:
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">⚙️</span>
-        <h4 class="nexchat-field-title">{child_table_label} Row {row_number} - {field_label}</h4>
-        <span class="nexchat-field-type">Select</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ No options available</div>
-        <ul class="nexchat-help-list">
-            <li>Type <code>cancel</code> to cancel</li>
-            <li>Contact administrator to configure options</li>
-        </ul>
-    </div>
-</div>
-"""
+            options_text = f"⚙️ **{child_table_label} Row {row_number} - {field_label}**\n\nℹ️ No options available.\n\n• Type `cancel` to cancel\n• Contact administrator to configure options"
         
         # Save state for child table field collection
         state["numbered_options"] = option_list
         set_conversation_state(user, state)
         
-        return options_html
+        return options_text
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_child_table_date_selection(field_name, field_label, state, user, child_table_label, row_number):
-    """Show beautiful calendar-like date picker for Date fields in child tables"""
+    """Show simple date picker for Date fields in child tables"""
     try:
         from datetime import date, timedelta
         
         today = date.today()
-        tomorrow = today + timedelta(days=1)
-        week_later = today + timedelta(days=7)
-        month_later = today + timedelta(days=30)
+        
+        # For delivery_date, ensure all options are today or future
+        if field_name == "delivery_date":
+            option1 = today
+            option2 = today + timedelta(days=1)
+            option3 = today + timedelta(days=7)
+            option4 = today + timedelta(days=30)
+            
+            option1_label = "Today"
+            option2_label = "Tomorrow"
+            option3_label = "Next Week"
+            option4_label = "Next Month"
+        else:
+            # For other date fields, use normal options
+            option1 = today
+            option2 = today + timedelta(days=1)
+            option3 = today + timedelta(days=7)
+            option4 = today + timedelta(days=30)
+            
+            option1_label = "Today"
+            option2_label = "Tomorrow"
+            option3_label = "Next Week"
+            option4_label = "Next Month"
         
         date_options = [
-            today.strftime("%Y-%m-%d"),
-            tomorrow.strftime("%Y-%m-%d"), 
-            week_later.strftime("%Y-%m-%d"),
-            month_later.strftime("%Y-%m-%d")
+            option1.strftime("%Y-%m-%d"),
+            option2.strftime("%Y-%m-%d"), 
+            option3.strftime("%Y-%m-%d"),
+            option4.strftime("%Y-%m-%d")
         ]
         
-        # Create beautiful HTML structure with calendar-like interface
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">📅</span>
-        <h4 class="nexchat-field-title">{child_table_label} Row {row_number} - {field_label}</h4>
-        <span class="nexchat-field-type">Date</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Quick Date Options</span>
-        <span class="nexchat-options-count">4</span>
-    </div>
-    
-    <div class="nexchat-date-options">
-        <div class="nexchat-date-option" onclick="selectOption('{today.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">1</div>
-            <div class="nexchat-date-primary">Today</div>
-            <div class="nexchat-date-secondary">{today.strftime('%Y-%m-%d')} ({today.strftime('%A')})</div>
-        </div>
+        # Get current year for examples
+        current_year = today.year
+        future_date1 = f"{current_year}-12-25"
+        future_date2 = f"{current_year + 1}-06-15"
+        future_date3 = f"{current_year + 1}-03-01"
         
-        <div class="nexchat-date-option" onclick="selectOption('{tomorrow.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">2</div>
-            <div class="nexchat-date-primary">Tomorrow</div>
-            <div class="nexchat-date-secondary">{tomorrow.strftime('%Y-%m-%d')} ({tomorrow.strftime('%A')})</div>
-        </div>
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
         
-        <div class="nexchat-date-option" onclick="selectOption('{week_later.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">3</div>
-            <div class="nexchat-date-primary">Next Week</div>
-            <div class="nexchat-date-secondary">{week_later.strftime('%Y-%m-%d')} ({week_later.strftime('%A')})</div>
-        </div>
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            f"📅 **{child_table_label} Row {row_number} - {field_label}**",
+            f"*Choose a date for your {field_label.lower()}*\n"
+        ]
         
-        <div class="nexchat-date-option" onclick="selectOption('{month_later.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">4</div>
-            <div class="nexchat-date-primary">Next Month</div>
-            <div class="nexchat-date-secondary">{month_later.strftime('%Y-%m-%d')} ({month_later.strftime('%A')})</div>
-        </div>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Click a <strong>date option</strong> above</li>
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for quick options</li>
-            <li>Type a <strong>custom date</strong> in YYYY-MM-DD format</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
+        # Add beautiful quick date options with circled numbers
+        response_parts.extend([
+            "**⚡ Quick Date Options:**",
+            f"{circled_numbers[0]} **{option1_label}** - `{option1.strftime('%Y-%m-%d')}` ({option1.strftime('%A')})",
+            f"{circled_numbers[1]} **{option2_label}** - `{option2.strftime('%Y-%m-%d')}` ({option2.strftime('%A')})",
+            f"{circled_numbers[2]} **{option3_label}** - `{option3.strftime('%Y-%m-%d')}` ({option3.strftime('%A')})",
+            f"{circled_numbers[3]} **{option4_label}** - `{option4.strftime('%Y-%m-%d')}` ({option4.strftime('%A')})",
+            ""
+        ])
         
-        <div class="nexchat-examples-grid">
-            <div class="nexchat-example-item">2024-12-25</div>
-            <div class="nexchat-example-item">2024-06-15</div>
-            <div class="nexchat-example-item">2024-03-01</div>
-        </div>
-    </div>
-</div>
-"""
+        response_parts.extend([
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `2`) for quick date options",
+            "• Type a **custom date** in `YYYY-MM-DD` format",
+            "• Type `cancel` to cancel operation"
+        ])
+        
+        # Add specific instructions for delivery date
+        if field_name == "delivery_date":
+            response_parts.extend([
+                "",
+                "**⚠️ Important Note:**",
+                "• **Delivery date must be today or later**",
+                "• Past dates will be rejected automatically"
+            ])
+        
+        response_parts.extend([
+            "",
+            "**📝 Custom Date Examples:**",
+            f"• `{future_date1}` → Christmas {current_year}",
+            f"• `{future_date2}` → Mid-year {current_year + 1}",
+            f"• `{future_date3}` → March 1st {current_year + 1}",
+            "",
+            f"**🎯 Row {row_number} Date Selection:**",
+            f"• **Field:** {field_label}",
+            f"• **Row:** {row_number} in {child_table_label}",
+            f"• **Today's Date:** {today.strftime('%Y-%m-%d')} ({today.strftime('%A')})",
+            f"• **Format Required:** YYYY-MM-DD"
+        ])
         
         # Save state for child table field collection
         state["numbered_options"] = date_options
         set_conversation_state(user, state)
         
-        return options_html
+        return "\n".join(response_parts)
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_child_table_numeric_input(field_name, field_label, fieldtype, state, user, child_table_label, row_number):
-    """Show beautiful numeric input interface for numeric fields in child tables"""
+    """Show simple numeric input interface for numeric fields in child tables"""
     try:
         # Create appropriate icon and examples based on field type
         if fieldtype == "Int":
             icon = "🔢"
-            examples = ["`100`", "`250`", "`1000`"]
+            examples = ["100", "250", "1000"]
             description = f"whole number for {field_label.lower()}"
-            format_info = ["Positive numbers: `100`, `250`", "Zero: `0`", "No negative values allowed"]
+            format_info = ["Positive numbers: 100, 250", "Zero: 0", "No negative values allowed"]
         elif fieldtype == "Currency":
             icon = "💰"
-            examples = ["`100.50`", "`25000`", "`1000.99`"]
+            examples = ["100.50", "25000", "1000.99"]
             description = f"amount for {field_label.lower()}"
-            format_info = ["Decimals: `100.50`, `25000.75`", "Whole amounts: `100`, `250`", "Large amounts: `1000000`"]
+            format_info = ["Decimals: 100.50, 25000.75", "Whole amounts: 100, 250", "Large amounts: 1000000"]
         elif fieldtype == "Percent":
             icon = "📊" 
-            examples = ["`15`", "`25.5`", "`100`"]
+            examples = ["15", "25.5", "100"]
             description = f"percentage for {field_label.lower()}"
-            format_info = ["Whole percent: `15`, `50`", "Decimal percent: `25.5`, `12.75`", "Range: 0 to 100"]
+            format_info = ["Whole percent: 15, 50", "Decimal percent: 25.5, 12.75", "Range: 0 to 100"]
         else:  # Float
             icon = "💯"
-            examples = ["`100.50`", "`25.75`", "`1000.99`"]
+            examples = ["100.50", "25.75", "1000.99"]
             description = f"decimal number for {field_label.lower()}"
-            format_info = ["Decimals: `100.50`, `25.75`", "Whole numbers: `100`, `250`", "Scientific: `1e3` (1000)"]
+            format_info = ["Decimals: 100.50, 25.75", "Whole numbers: 100, 250", "Scientific: 1e3 (1000)"]
         
-        # Create beautiful HTML structure
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">{child_table_label} Row {row_number} - {field_label}</h4>
-        <span class="nexchat-field-type">{fieldtype}</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to enter:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a {description}</li>
-            <li>Type <code>0</code> if no value</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-    
-    <div class="nexchat-examples-grid">
-        {' '.join([f'<div class="nexchat-example-item">{example}</div>' for example in examples])}
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ Supported formats:</div>
-        <ul class="nexchat-help-list">
-            {''.join([f'<li>{format_item}</li>' for format_item in format_info])}
-        </ul>
-    </div>
-</div>
-"""
+        # Create simple text-based interface
+        response_parts = [
+            f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n",
+            f"Enter a {description}\n",
+            "**💡 How to enter:**",
+            f"• Type a {description}",
+            "• Type `0` if no value",
+            "• Type `cancel` to cancel\n",
+            f"**📝 Examples:** `{examples[0]}`, `{examples[1]}`, `{examples[2]}`\n",
+            "**ℹ️ Supported formats:**"
+        ]
+        
+        for format_item in format_info:
+            response_parts.append(f"• {format_item}")
         
         # Save state for child table field collection
         state["numbered_options"] = []
         set_conversation_state(user, state)
         
-        return options_html
+        return "\n".join(response_parts)
         
     except Exception as e:
         return f"Error showing {field_label} input: {str(e)}"
 
 def show_child_table_text_input(field_name, field_label, fieldtype, state, user, child_table_label, row_number):
-    """Show beautiful text input interface for text fields in child tables"""
+    """Show simple text input interface for text fields in child tables"""
     try:
         # Get appropriate icon based on field type
         field_icons = {
@@ -713,34 +692,23 @@ def show_child_table_text_input(field_name, field_label, fieldtype, state, user,
         else:
             example = f"Your {field_label.lower()} here"
         
-        # Create beautiful HTML structure
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">{child_table_label} Row {row_number} - {field_label}</h4>
-        <span class="nexchat-field-type">{fieldtype}</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to enter:</div>
-        <ul class="nexchat-help-list">
-            <li>Type your text directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-    
-    <div class="nexchat-examples-grid">
-        <div class="nexchat-example-item">{example}</div>
-    </div>
-</div>
-"""
+        # Create simple text-based interface
+        response_parts = [
+            f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n",
+            "**💡 How to enter:**",
+            "• Type your text directly",
+            "• Type `cancel` to cancel",
+            "",
+            f"**📝 Example:** `{example}`"
+        ]
+        
+        options_text = "\n".join(response_parts)
         
         # Save state for child table field collection
         state["numbered_options"] = []
         set_conversation_state(user, state)
         
-        return options_html
+        return options_text
         
     except Exception as e:
         return f"Error showing {field_label} input: {str(e)}"
@@ -769,14 +737,14 @@ def handle_child_table_field_input(message, state, user):
         
         # Handle numbered options first (for Link, Select, Date fields)
         if numbered_options and user_input.isdigit():
-            try:
-                num = int(user_input)
-                if 1 <= num <= len(numbered_options):
-                    selected_value = numbered_options[num - 1]
-                else:
-                    return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
-            except ValueError:
-                return f"❌ Invalid input. Please use numbers or direct input."
+                try:
+                    num = int(user_input)
+                    if 1 <= num <= len(numbered_options):
+                      selected_value = numbered_options[num - 1]
+                    else:
+                        return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
+                except ValueError:
+                        return f"❌ Invalid input. Please use numbers or direct input."
         else:
             # Handle direct input or non-numeric fields
             try:
@@ -865,12 +833,22 @@ def validate_field_input(user_input, field_info):
     elif fieldtype == "Date":
         import re
         if re.match(r'^\d{4}-\d{2}-\d{2}$', user_input):
-            from datetime import datetime
+            from datetime import datetime, date
             try:
-                datetime.strptime(user_input, '%Y-%m-%d')
+                input_date = datetime.strptime(user_input, '%Y-%m-%d').date()
+                
+                # Special validation for delivery_date - must be today or future
+                if fieldname == "delivery_date":
+                    today = date.today()
+                    if input_date < today:
+                        raise ValueError(f"Delivery date cannot be in the past. Please enter a date from {today.strftime('%Y-%m-%d')} onwards.")
+                
                 return user_input
-            except ValueError:
-                raise ValueError("Invalid date. Please use YYYY-MM-DD format.")
+            except ValueError as e:
+                if "Delivery date cannot be in the past" in str(e):
+                    raise e
+                else:
+                    raise ValueError("Invalid date. Please use YYYY-MM-DD format.")
         else:
             raise ValueError("Invalid date format. Please use YYYY-MM-DD format (e.g., 2024-12-31).")
     
@@ -1489,7 +1467,28 @@ def handle_stock_selection_collection(message, state, user):
                 return f"❌ Invalid input. Please use numbers (e.g., 1, 2, 3) or type the option name."
         else:
             # Try to match the text directly (for non-numeric options)
-            if numbered_options:
+            # For currency fields, search across all currencies first
+            all_currency_options = state.get("all_currency_options", [])
+            if selection_type == "currency" and all_currency_options:
+                # Search across all currencies, not just current page
+                exact_matches = [opt for opt in all_currency_options if opt.lower() == user_input.lower()]
+                if len(exact_matches) == 1:
+                    selected_value = exact_matches[0]
+                elif len(exact_matches) > 1:
+                    selected_value = exact_matches[0]  # Take first exact match
+                else:
+                    # Try partial match across all currencies
+                    matching_options = [opt for opt in all_currency_options if user_input.lower() in opt.lower()]
+                    if len(matching_options) == 1:
+                        selected_value = matching_options[0]
+                    elif len(matching_options) > 1:
+                        # Show first few matches for user to choose from
+                        match_list = ", ".join(matching_options[:5])
+                        return f"Multiple currencies found matching '{user_input}': {match_list}. Please be more specific."
+                    else:
+                        return f"Currency '{user_input}' not found. Please use numbers (e.g., 1, 2, 3) or exact currency codes like USD, INR, EUR."
+            elif numbered_options:
+                # Standard search for non-currency fields
                 # First try exact match (case-insensitive)
                 exact_matches = [opt for opt in numbered_options if opt.lower() == user_input.lower()]
                 if len(exact_matches) == 1:
@@ -1842,7 +1841,7 @@ def handle_stock_selection_collection(message, state, user):
             try:
                 frappe.log_error(f"Child check for {current_doctype}: required={required_child_tables}, missing={missing_child_tables}", "Final Child Check")
             except:
-                pass
+                    pass
             
             if missing_child_tables:
                 # Need to collect child tables first
@@ -2122,7 +2121,36 @@ def execute_task(task_json, user, user_input=""):
         if any(pattern in user_input_lower for pattern in ['create doctype', 'create a doctype', 'new doctype', 'make doctype']):
             return handle_create_doctype_action(task_json, user, user_input)
         
-        return "I'm not sure what you'd like me to do. Could you please be more specific? For example, try saying 'Create a new customer' or 'Show me my sales orders'."
+        # Create beautiful help message for unclear requests
+        response_parts = [
+            "🤔 **Request Unclear**",
+            "*I need more specific information to help you*\n",
+            "**💡 What I can help with:**",
+            "• **Create documents:** `Create a new customer`, `Make a sales order`",
+            "• **List information:** `Show me all customers`, `List sales orders`",
+            "• **Get details:** `Get customer details for CUST-001`",
+            "• **Update records:** `Update customer CUST-001 set name to ABC Corp`",
+            "• **Assign roles:** `Assign Sales User role to user@company.com`",
+            "",
+            "**📝 Example commands:**",
+            "• `Create a new customer`",
+            "• `Show me my sales orders`",
+            "• `List all items`", 
+            "• `Update customer ABC-001`",
+            "• `Create a purchase order`",
+            "",
+            "**🎯 Document types I work with:**",
+            "• Customer, Supplier, Item, Employee",
+            "• Sales Order, Purchase Order, Quotation",
+            "• Sales Invoice, Purchase Invoice",
+            "• Stock Entry, Asset, Project, Task",
+            "",
+            "**💬 Try being more specific:**",
+            "• Include the action you want (create, show, update, delete)",
+            "• Mention the document type (customer, item, order, etc.)",
+            "• Add any specific details or names"
+        ]
+        return "\n".join(response_parts)
 
     # Check permissions
     if not frappe.has_permission(doctype, "read"):
@@ -2403,7 +2431,7 @@ def handle_create_action(doctype, task_json, user):
                     if df.fieldtype == "Table":
                         continue
                     required_fields.append(df.fieldname)
-        
+
         # Add hardcoded required fields for specific doctypes
         if doctype == "Payment Entry":
             # These fields are required by business logic even if not marked reqd=1
@@ -2523,42 +2551,42 @@ def handle_create_action(doctype, task_json, user):
             
             # Handle regular fields first, then child tables
             if missing_fields:
-                field_to_ask = missing_fields[0]
-                
-                # Check if field exists in meta
-                try:
-                    field_obj = meta.get_field(field_to_ask)
-                except Exception as field_error:
-                    field_obj = None
-                
-                if field_obj:
-                    # Use smart field selection for all doctypes - CRITICAL: Pass the original doctype
-                    return get_smart_field_selection(field_to_ask, field_obj, data, missing_fields, user, doctype)
-                else:
-                    # Fallback if field not found in metadata
-                    label_to_ask = field_to_ask.replace("_", " ").title()
-                    
-                    # Save the current state with EXPLICIT doctype - CRITICAL FIX
-                    state = {
-                        "action": "collect_stock_selection",  # Use stock_selection for consistency
-                        "selection_type": field_to_ask,
-                        "doctype": doctype,  # CRITICAL: Preserve original doctype explicitly
-                        "data": data,
-                        "missing_fields": missing_fields,
-                        "numbered_options": []
-                    }
-                    set_conversation_state(user, state)
-                    
-                    return f"I can create a {doctype} for you! What should I set as the {label_to_ask}?"
+              field_to_ask = missing_fields[0]
             
-            elif missing_child_tables:
-                # All regular fields collected, now collect child tables
-                child_table_to_collect = missing_child_tables[0]
-                try:
+            # Check if field exists in meta
+            try:
+                field_obj = meta.get_field(field_to_ask)
+            except Exception as field_error:
+                field_obj = None
+            
+            if field_obj:
+                # Use smart field selection for all doctypes - CRITICAL: Pass the original doctype
+                return get_smart_field_selection(field_to_ask, field_obj, data, missing_fields, user, doctype)
+            else:
+                # Fallback if field not found in metadata
+                label_to_ask = field_to_ask.replace("_", " ").title()
+                
+                # Save the current state with EXPLICIT doctype - CRITICAL FIX
+                state = {
+                    "action": "collect_stock_selection",  # Use stock_selection for consistency
+                    "selection_type": field_to_ask,
+                    "doctype": doctype,  # CRITICAL: Preserve original doctype explicitly
+                    "data": data,
+                    "missing_fields": missing_fields,
+                    "numbered_options": []
+                }
+                set_conversation_state(user, state)
+                
+                return f"I can create a {doctype} for you! What should I set as the {label_to_ask}?"
+            
+        elif missing_child_tables:
+            # All regular fields collected, now collect child tables
+            child_table_to_collect = missing_child_tables[0]
+            try:
                     frappe.log_error(f"Transitioning to child table: {child_table_to_collect} for {doctype}", "Child Table Transition")
-                except:
-                    pass
-                return show_child_table_collection(doctype, child_table_to_collect, data, missing_child_tables, user)
+            except:
+                   pass
+            return show_child_table_collection(doctype, child_table_to_collect, data, missing_child_tables, user)
         
         else:
             # All required fields and child tables are present, create the document
@@ -2668,6 +2696,14 @@ def create_document(doctype, data, user):
             for table_field, rows in child_table_data.items():
                 if isinstance(rows, list):
                     for row_data in rows:
+                        # Set default delivery_date for Sales Order Items if not provided
+                        if doctype == "Sales Order" and table_field == "items" and "delivery_date" not in row_data:
+                            from datetime import date, timedelta
+                            # Default to 7 days from today to ensure it's after sales order date
+                            default_delivery_date = date.today() + timedelta(days=7)
+                            row_data["delivery_date"] = default_delivery_date.strftime("%Y-%m-%d")
+                            frappe.log_error(f"Auto-set delivery_date to {default_delivery_date.strftime('%Y-%m-%d')} for Sales Order Item", "Delivery Date Auto-Set")
+                        
                         doc.append(table_field, row_data)
         
         # Insert the document
@@ -2675,17 +2711,92 @@ def create_document(doctype, data, user):
         frappe.db.commit()
         
         clear_conversation_state(user)
-        return f"✅ {doctype} '{doc.name}' has been created successfully! You can view it in the {doctype} list."
+        # Create beautiful success message with heavy markdown styling
+        response_parts = [
+            f"🎉 **{doctype} Created Successfully!**",
+            f"*Your new {doctype.lower()} is ready for use*\n",
+            f"📋 **Document Details:**",
+            f"• **{doctype} ID:** `{doc.name}`",
+            f"• **Status:** ✅ Active and saved",
+            f"• **Location:** Available in {doctype} list",
+            "",
+            f"**🚀 What's Next:**",
+            f"• **View:** Check the {doctype} list to see your new document",
+            f"• **Edit:** Make changes anytime via ERPNext interface", 
+            f"• **Use:** This {doctype.lower()} is ready for transactions",
+            "",
+            f"**💡 Quick Access:**",
+            f"• Navigate to **{doctype}** → **{doctype} List**",
+            f"• Search for `{doc.name}` to find your document",
+            f"• All fields have been saved successfully!"
+        ]
+        
+        clear_conversation_state(user)
+        return "\n".join(response_parts)
         
     except frappe.DuplicateEntryError:
         clear_conversation_state(user)
-        return f"A {doctype} with this information already exists. Please check the {doctype} list or try with different details."
+        # Create beautiful duplicate error message
+        response_parts = [
+            f"⚠️ **{doctype} Already Exists**",
+            f"*A {doctype.lower()} with this information is already in the system*\n",
+            f"**🔍 What happened:**",
+            f"• A {doctype.lower()} with these details already exists",
+            f"• ERPNext prevents duplicate entries automatically",
+            f"• This helps maintain data integrity",
+            "",
+            f"**💡 What you can do:**",
+            f"• **Check existing:** Look in the {doctype} list for similar entries",
+            f"• **Modify details:** Try with different name or information",
+            f"• **Update existing:** Edit the existing {doctype.lower()} instead",
+            "",
+            f"**🔧 Suggestions:**",
+            f"• Use `List all {doctype.lower()}s` to see existing entries",
+            f"• Try a different name or identifier",
+            f"• Update the existing record if needed"
+        ]
+        return "\n".join(response_parts)
     except frappe.ValidationError as e:
         clear_conversation_state(user)
-        return f"Could not create {doctype}: {str(e)}"
+        # Create beautiful validation error message
+        response_parts = [
+            f"❌ **{doctype} Validation Failed**",
+            f"*The {doctype.lower()} data didn't pass validation checks*\n",
+            f"**🚨 Validation Error:**",
+            f"• `{str(e)}`",
+            "",
+            f"**💡 Common solutions:**",
+            f"• **Check required fields:** Ensure all mandatory fields are filled",
+            f"• **Verify formats:** Dates, emails, numbers should be in correct format",
+            f"• **Review permissions:** Check if you can create this {doctype.lower()}",
+            f"• **Validate links:** Ensure linked documents exist",
+            "",
+            f"**🔧 Try again with:**",
+            f"• Corrected field values",
+            f"• All required information",
+            f"• Proper data formats"
+        ]
+        return "\n".join(response_parts)
     except Exception as e:
         clear_conversation_state(user)
-        return f"Error creating {doctype}: {str(e)}"
+        # Create beautiful general error message
+        response_parts = [
+            f"💥 **{doctype} Creation Error**",
+            f"*An unexpected error occurred while creating your {doctype.lower()}*\n",
+            f"**🚨 Error Details:**",
+            f"• `{str(e)}`",
+            "",
+            f"**💡 What to try:**",
+            f"• **Retry:** Try creating the {doctype.lower()} again",
+            f"• **Check data:** Verify all information is correct",
+            f"• **Contact admin:** If the error persists",
+            "",
+            f"**🔧 Troubleshooting:**",
+            f"• Check your permissions for {doctype}",
+            f"• Ensure all required fields are provided",
+            f"• Verify system connectivity"
+        ]
+        return "\n".join(response_parts)
 
 def handle_list_action(doctype, task_json):
     """Handle listing documents"""
@@ -2703,15 +2814,86 @@ def handle_list_action(doctype, task_json):
         
         if not docs:
             filter_text = f" matching your criteria" if filters else ""
-            return f"No {doctype} documents found{filter_text}."
+            # Create beautiful no results message
+            response_parts = [
+                f"📋 **{doctype} List**",
+                f"*No {doctype.lower()} documents found{filter_text}*\n",
+                f"**🔍 Search Results:**",
+                f"• **Found:** 0 {doctype.lower()}s",
+                f"• **Filters:** {filters if filters else 'None applied'}",
+                "",
+                f"**💡 What you can do:**",
+                f"• **Create new:** `Create a new {doctype.lower()}`",
+                f"• **Remove filters:** Try without search criteria",
+                f"• **Check spelling:** Verify filter values are correct",
+                "",
+                f"**🚀 Quick Actions:**",
+                f"• Create your first {doctype.lower()}",
+                f"• Import {doctype.lower()}s from spreadsheet",
+                f"• Configure {doctype.lower()} settings"
+            ]
+            return "\n".join(response_parts)
         
-        doc_list = "\n".join([f"• {doc.name}" for doc in docs])
-        count_text = f"Here are the {len(docs)} most recent" if len(docs) == 10 else f"Found {len(docs)}"
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
         
-        return f"{count_text} {doctype} documents:\n\n{doc_list}\n\nYou can view more details by asking about a specific document."
+        # Create beautiful document list
+        response_parts = [
+            f"📋 **{doctype} List**",
+            f"*{len(docs)} most recent {doctype.lower()} documents*\n"
+        ]
+        
+        # Add the beautiful document cards with circled numbers
+        response_parts.append(f"**📄 Recent {doctype}s:**")
+        for i, doc in enumerate(docs, 1):
+            badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+            # Format modified date nicely
+            from datetime import datetime
+            try:
+                mod_date = doc.modified.strftime("%b %d, %Y") if hasattr(doc.modified, 'strftime') else str(doc.modified)[:10]
+            except:
+                mod_date = "Recent"
+            response_parts.append(f"{badge} **{doc.name}** *({mod_date})*")
+        
+        response_parts.extend([
+            "",
+            f"**📊 List Summary:**",
+            f"• **Total Shown:** {len(docs)} {doctype.lower()}s",
+            f"• **Order:** Most recent first",
+            f"• **Status:** All active documents",
+            "",
+            f"**💡 More Actions:**",
+            f"• **Get details:** `Get {doctype.lower()} [name]`",
+            f"• **Update:** `Update {doctype.lower()} [name] set [field] to [value]`",
+            f"• **Create new:** `Create a new {doctype.lower()}`",
+            "",
+            f"**🔍 Navigation:**",
+            f"• Ask about specific {doctype.lower()}s by name",
+            f"• Use ERPNext interface for full list view",
+            f"• Filter results with specific criteria"
+        ])
+        
+        return "\n".join(response_parts)
         
     except Exception as e:
-        return f"Error retrieving {doctype} list: {str(e)}"
+        # Create beautiful error message
+        response_parts = [
+            f"💥 **{doctype} List Error**",
+            f"*Error retrieving {doctype.lower()} documents*\n",
+            f"**🚨 Error Details:**",
+            f"• `{str(e)}`",
+            "",
+            f"**💡 Try these solutions:**",
+            f"• **Retry:** Ask for the list again",
+            f"• **Check permissions:** Ensure you can view {doctype.lower()}s",
+            f"• **Contact admin:** If error persists",
+            "",
+            f"**🔧 Alternative:**",
+            f"• Access {doctype} list via ERPNext interface",
+            f"• Use different search criteria",
+            f"• Check system connectivity"
+        ]
+        return "\n".join(response_parts)
 
 def handle_get_action(doctype, task_json):
     """Handle getting specific document information"""
@@ -2720,37 +2902,134 @@ def handle_get_action(doctype, task_json):
         field = task_json.get("field")
         
         if not filters:
-            return f"Please specify which {doctype} you'd like to get information about."
+            # Create beautiful help message for missing filters
+            response_parts = [
+                f"🔍 **Get {doctype} Information**",
+                f"*Specify which {doctype.lower()} you'd like details about*\n",
+                f"**💡 How to specify:**",
+                f"• **By name:** `Get {doctype.lower()} [document-name]`",
+                f"• **By ID:** `Get {doctype.lower()} [ID]`",
+                f"• **Specific field:** `Get [field] for {doctype.lower()} [name]`",
+                "",
+                f"**📝 Examples:**",
+                f"• `Get {doctype.lower()} CUST-001`",
+                f"• `Get customer_name for {doctype.lower()} CUST-001`",
+                f"• `Show {doctype.lower()} details for [name]`",
+                "",
+                f"**🎯 What I can show:**",
+                f"• All field values for the {doctype.lower()}",
+                f"• Specific field information",
+                f"• Document status and details"
+            ]
+            return "\n".join(response_parts)
         
         doc = frappe.get_doc(doctype, filters)
         
         if field and hasattr(doc, field):
             value = getattr(doc, field)
-            return f"The {field} for {doctype} '{doc.name}' is: {value}"
+            # Create beautiful single field response
+            response_parts = [
+                f"🔍 **{doctype} Field Information**",
+                f"*{field} value for {doctype.lower()} '{doc.name}'*\n",
+                f"**📋 Field Details:**",
+                f"• **Document:** {doc.name}",
+                f"• **Field:** {field}",
+                f"• **Value:** `{value}`",
+                "",
+                f"**💡 More actions:**",
+                f"• **Full details:** `Get {doctype.lower()} {doc.name}`",
+                f"• **Update field:** `Update {doctype.lower()} {doc.name} set {field} to [new_value]`",
+                f"• **List all:** `Show all {doctype.lower()}s`"
+            ]
+            return "\n".join(response_parts)
         else:
-            # Return basic info about the document
+            # Return basic info about the document with beautiful formatting
             info_fields = ["name"]
             meta = frappe.get_meta(doctype)
             
             # Add some commonly useful fields
-            for df in meta.fields[:5]:  # First few fields
-                if not df.hidden and df.fieldtype not in ["Section Break", "Column Break", "HTML"]:
+            for df in meta.fields[:8]:  # Show more fields
+                if not df.hidden and df.fieldtype not in ["Section Break", "Column Break", "HTML", "Table"]:
                     info_fields.append(df.fieldname)
             
-            info = []
+            # Create beautiful document details response
+            response_parts = [
+                f"📄 **{doctype} Details**",
+                f"*Complete information for {doctype.lower()} '{doc.name}'*\n",
+                f"**📋 Document Information:**"
+            ]
+            
+            field_count = 0
             for field_name in info_fields:
                 if hasattr(doc, field_name):
                     value = getattr(doc, field_name)
                     if value:
-                        field_label = meta.get_field(field_name).label if meta.get_field(field_name) else field_name
-                        info.append(f"{field_label}: {value}")
+                        field_obj = meta.get_field(field_name)
+                        field_label = field_obj.label if field_obj else field_name.replace("_", " ").title()
+                        response_parts.append(f"• **{field_label}:** `{value}`")
+                        field_count += 1
+                        if field_count >= 10:  # Limit to 10 fields for chat display
+                            break
             
-            return f"Here's information about {doctype} '{doc.name}':\n\n" + "\n".join(info)
+            response_parts.extend([
+                "",
+                f"**📊 Document Summary:**",
+                f"• **Type:** {doctype}",
+                f"• **ID:** {doc.name}",
+                f"• **Fields shown:** {field_count} of {len(meta.fields)} total",
+                "",
+                f"**💡 Available actions:**",
+                f"• **Update:** `Update {doctype.lower()} {doc.name} set [field] to [value]`",
+                f"• **List related:** `Show all {doctype.lower()}s`", 
+                f"• **Create similar:** `Create a new {doctype.lower()}`",
+                "",
+                f"**🔧 Access full details:**",
+                f"• Navigate to {doctype} → {doc.name} in ERPNext",
+                f"• Use the web interface for complete view",
+                f"• Export data for external analysis"
+            ])
+            
+            return "\n".join(response_parts)
             
     except frappe.DoesNotExistError:
-        return f"Could not find a {doctype} matching your criteria."
+        # Create beautiful not found message
+        response_parts = [
+            f"❌ **{doctype} Not Found**",
+            f"*Could not locate the requested {doctype.lower()}*\n",
+            f"**🔍 Search criteria:**",
+            f"• **Filters:** {filters}",
+            f"• **Doctype:** {doctype}",
+            "",
+            f"**💡 Possible reasons:**",
+            f"• **Wrong name:** Check the {doctype.lower()} name/ID spelling",
+            f"• **Deleted:** The {doctype.lower()} may have been removed",
+            f"• **Permissions:** You might not have access to view it",
+            "",
+            f"**🔧 Try these solutions:**",
+            f"• **Check spelling:** Verify the {doctype.lower()} name is correct",
+            f"• **List all:** Use `Show all {doctype.lower()}s` to see available ones",
+            f"• **Contact admin:** If you should have access to this {doctype.lower()}"
+        ]
+        return "\n".join(response_parts)
     except Exception as e:
-        return f"Error retrieving {doctype} information: {str(e)}"
+        # Create beautiful error message
+        response_parts = [
+            f"💥 **{doctype} Retrieval Error**",
+            f"*Error getting {doctype.lower()} information*\n",
+            f"**🚨 Error Details:**",
+            f"• `{str(e)}`",
+            "",
+            f"**💡 What to try:**",
+            f"• **Retry:** Ask for the {doctype.lower()} again",
+            f"• **Check name:** Verify the {doctype.lower()} name is correct",
+            f"• **Check permissions:** Ensure you can view {doctype.lower()}s",
+            "",
+            f"**🔧 Alternative:**",
+            f"• Use the ERPNext interface to access {doctype}",
+            f"• Try listing all {doctype.lower()}s first",
+            f"• Contact system administrator"
+        ]
+        return "\n".join(response_parts)
 
 def handle_update_action(doctype, task_json, user):
     """Handle document updates"""
@@ -2923,8 +3202,36 @@ def handle_update_action(doctype, task_json, user):
         doc.save()
         frappe.db.commit()
         
-        updated_list = "\n".join([f"• {field}" for field in updated_fields])
-        return f"✅ Successfully updated {doctype} '{doc.name}':\n\n{updated_list}"
+        # Create beautiful success message for updates
+        response_parts = [
+            f"✅ **{doctype} Updated Successfully!**",
+            f"*Changes have been saved to {doctype.lower()} '{doc.name}'*\n",
+            f"**📝 Updated Fields:**"
+        ]
+        
+        # Add updated fields with beautiful formatting
+        for field in updated_fields:
+            response_parts.append(f"• {field}")
+        
+        response_parts.extend([
+            "",
+            f"**📊 Update Summary:**",
+            f"• **Document:** {doc.name}",
+            f"• **Fields changed:** {len(updated_fields)}",
+            f"• **Status:** ✅ All changes saved",
+            "",
+            f"**💡 What's next:**",
+            f"• **View:** Check the updated {doctype.lower()} in ERPNext",
+            f"• **More updates:** Make additional changes anytime",
+            f"• **Verify:** Review the changes in the document",
+            "",
+            f"**🔧 Quick actions:**",
+            f"• **Get details:** `Get {doctype.lower()} {doc.name}`",
+            f"• **List all:** `Show all {doctype.lower()}s`",
+            f"• **Create new:** `Create a new {doctype.lower()}`"
+        ])
+        
+        return "\n".join(response_parts)
         
     except frappe.ValidationError as e:
         return f"Could not update {doctype}: {str(e)}"
@@ -2957,7 +3264,31 @@ def handle_delete_action(doctype, task_json):
         frappe.delete_doc(doctype, doc_name)
         frappe.db.commit()
         
-        return f"✅ Successfully deleted {doctype} '{doc_name}'."
+        # Create beautiful delete success message
+        response_parts = [
+            f"🗑️ **{doctype} Deleted Successfully!**",
+            f"*{doctype} '{doc_name}' has been permanently removed*\n",
+            f"**📋 Deletion Details:**",
+            f"• **Document:** {doc_name}",
+            f"• **Type:** {doctype}",
+            f"• **Status:** ✅ Permanently deleted",
+            "",
+            f"**💡 What happened:**",
+            f"• The {doctype.lower()} has been removed from the system",
+            f"• All data associated with '{doc_name}' is deleted",
+            f"• This action cannot be undone",
+            "",
+            f"**🚀 What's next:**",
+            f"• **Create new:** `Create a new {doctype.lower()}`",
+            f"• **List others:** `Show all {doctype.lower()}s`",
+            f"• **Import data:** Restore from backup if needed",
+            "",
+            f"**⚠️ Important note:**",
+            f"• Deletion is permanent and cannot be reversed",
+            f"• Check for any linked documents that may be affected",
+            f"• Consider data backup procedures for future"
+        ]
+        return "\n".join(response_parts)
         
     except frappe.LinkExistsError:
         return f"Cannot delete this {doctype} because it is linked to other documents. Please remove the links first."
@@ -3155,7 +3486,31 @@ def assign_role_to_user(user_email, role_name):
         user_doc.save()
         frappe.db.commit()
         
-        return f"✅ Successfully assigned '{role_name}' role to user '{user_email}'!"
+        # Create beautiful role assignment success message
+        response_parts = [
+            f"🎉 **Role Assigned Successfully!**",
+            f"*'{role_name}' role has been granted to {user_email}*\n",
+            f"**👤 Assignment Details:**",
+            f"• **User:** {user_email}",
+            f"• **Role:** {role_name}",
+            f"• **Status:** ✅ Active and effective immediately",
+            "",
+            f"**🔐 What this means:**",
+            f"• User can now access {role_name} features",
+            f"• Permissions are active across all modules",
+            f"• Access level increased as per role definition",
+            "",
+            f"**💡 Next steps:**",
+            f"• **Verify:** User should log out and log back in",
+            f"• **Test:** Check new permissions are working",
+            f"• **Assign more:** Add additional roles if needed",
+            "",
+            f"**🔧 Additional actions:**",
+            f"• **View all roles:** `Show all roles`",
+            f"• **Assign more roles:** `Assign [role] to {user_email}`",
+            f"• **List users:** `Show all users`"
+        ]
+        return "\n".join(response_parts)
         
     except frappe.PermissionError:
         return f"You don't have permission to assign the '{role_name}' role."
@@ -3201,28 +3556,61 @@ def assign_multiple_roles_to_user(user_email, role_names):
             user_doc.save()
             frappe.db.commit()
         
-        # Build response message
-        response_parts = []
+        # Build beautiful response message with heavy markdown styling
+        main_response_parts = [
+            f"🎯 **Multiple Roles Assignment Complete!**",
+            f"*Role assignment results for {user_email}*\n"
+        ]
         
         if assigned_roles:
-            response_parts.append(f"✅ **Successfully assigned {len(assigned_roles)} role(s) to '{user_email}':**")
-            for role in assigned_roles:
-                response_parts.append(f"   • {role}")
+            main_response_parts.extend([
+                f"✅ **Successfully Assigned ({len(assigned_roles)} roles):**"
+            ])
+            for i, role in enumerate(assigned_roles, 1):
+                badge = f"✓" 
+                main_response_parts.append(f"   {badge} **{role}**")
         
         if already_assigned:
-            response_parts.append(f"\n📋 **Already assigned ({len(already_assigned)} role(s)):**")
+            main_response_parts.extend([
+                "",
+                f"📋 **Already Assigned ({len(already_assigned)} roles):**"
+            ])
             for role in already_assigned:
-                response_parts.append(f"   • {role}")
+                main_response_parts.append(f"   ℹ️ **{role}** *(was already active)*")
         
         if failed_roles:
-            response_parts.append(f"\n❌ **Failed to assign ({len(failed_roles)} role(s)):**")
+            main_response_parts.extend([
+                "",
+                f"❌ **Assignment Failed ({len(failed_roles)} roles):**"
+            ])
             for role in failed_roles:
-                response_parts.append(f"   • {role}")
+                main_response_parts.append(f"   ❌ **{role}**")
         
-        if not response_parts:
+        if not assigned_roles and not already_assigned and not failed_roles:
             return f"No changes made to user '{user_email}' roles."
         
-        return "\n".join(response_parts)
+        # Add summary section
+        total_active = len(assigned_roles) + len(already_assigned)
+        main_response_parts.extend([
+            "",
+            f"**📊 Assignment Summary:**",
+            f"• **User:** {user_email}",
+            f"• **New roles:** {len(assigned_roles)}",
+            f"• **Total active roles:** {total_active}+",
+            f"• **Status:** ✅ All changes saved",
+            "",
+            f"**🔐 User permissions:**",
+            f"• **Immediate effect:** All new roles are active now",
+            f"• **Access level:** Significantly enhanced",
+            f"• **Module access:** Expanded across ERPNext",
+            "",
+            f"**💡 Next steps:**",
+            f"• **User action:** Log out and log back in to see changes",
+            f"• **Verification:** Test new permissions and access",
+            f"• **Documentation:** Record role assignments for audit"
+        ])
+        
+        return "\n".join(main_response_parts)
         
     except frappe.PermissionError:
         return f"You don't have permission to assign roles to users."
@@ -3446,7 +3834,7 @@ All operations check your ERPNext permissions automatically!
 Try: "Create a new [doctype]" or "List all [doctype]" with any ERPNext document type!"""
 
 def show_stock_entry_type_selection(data, missing_fields, user):
-    """Show interactive selection for Stock Entry Type"""
+    """Show beautiful stock entry type selection with heavy markdown styling"""
     try:
         # Always use the standard stock entry types to ensure consistency
         stock_entry_types = [
@@ -3465,60 +3853,78 @@ def show_stock_entry_type_selection(data, missing_fields, user):
         transfer_types = ["Material Transfer", "Material Transfer for Manufacture"]
         production_types = ["Manufacture", "Repack"]
         
-        # Create formatted list with categorization
-        response_parts = [
-            "🎯 **Select Stock Entry Type:**\n"
-        ]
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
         
         current_number = 1
         
-        # Unicode circled numbers for beautiful badges
-        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            "🎯 **Select Stock Entry Type**",
+            f"*Choose from {len(stock_entry_types)} stock operations*\n"
+        ]
         
-        # Inbound Operations
-        response_parts.append("**📥 Inbound Operations:**")
-        for entry_type in inbound_types:
-            response_parts.append(f"{circled_numbers[current_number-1]} **{entry_type}**")
-            current_number += 1
-        response_parts.append("")
+        # Add beautiful sections with circled numbers
+        if inbound_types:
+            response_parts.append("**📥 Inbound Operations:**")
+            for entry_type in inbound_types:
+                badge = circled_numbers[current_number-1] if current_number <= len(circled_numbers) else f"({current_number})"
+                response_parts.append(f"{badge} **{entry_type}** - *Receive materials into warehouse*")
+                current_number += 1
+            response_parts.append("")
         
-        # Outbound Operations  
-        response_parts.append("**📤 Outbound Operations:**")
-        for entry_type in outbound_types:
-            response_parts.append(f"{circled_numbers[current_number-1]} **{entry_type}**")
-            current_number += 1
-        response_parts.append("")
+        if outbound_types:
+            response_parts.append("**📤 Outbound Operations:**")
+            for entry_type in outbound_types:
+                badge = circled_numbers[current_number-1] if current_number <= len(circled_numbers) else f"({current_number})"
+                description = "Issue materials from warehouse" if entry_type == "Material Issue" else "Send materials to subcontractor"
+                response_parts.append(f"{badge} **{entry_type}** - *{description}*")
+                current_number += 1
+            response_parts.append("")
         
-        # Transfer Operations
-        response_parts.append("**🔄 Transfer Operations:**")
-        for entry_type in transfer_types:
-            response_parts.append(f"{circled_numbers[current_number-1]} **{entry_type}**")
-            current_number += 1
-        response_parts.append("")
+        if transfer_types:
+            response_parts.append("**🔄 Transfer Operations:**")
+            for entry_type in transfer_types:
+                badge = circled_numbers[current_number-1] if current_number <= len(circled_numbers) else f"({current_number})"
+                description = "Move materials between warehouses" if entry_type == "Material Transfer" else "Transfer for manufacturing processes"
+                response_parts.append(f"{badge} **{entry_type}** - *{description}*")
+                current_number += 1
+            response_parts.append("")
         
-        # Production Operations
-        response_parts.append("**🏭 Production Operations:**")
-        for entry_type in production_types:
-            response_parts.append(f"{circled_numbers[current_number-1]} **{entry_type}**")
-            current_number += 1
-        response_parts.append("")
+        if production_types:
+            response_parts.append("**🏭 Production Operations:**")
+            for entry_type in production_types:
+                badge = circled_numbers[current_number-1] if current_number <= len(circled_numbers) else f"({current_number})"
+                description = "Manufacturing & production" if entry_type == "Manufacture" else "Repackaging operations"
+                response_parts.append(f"{badge} **{entry_type}** - *{description}*")
+                current_number += 1
+            response_parts.append("")
         
         response_parts.extend([
             "**💡 How to select:**",
             "• Type a **number** (e.g., `2`) for your choice",
             "• Type the **operation name** directly",
-            "• Type `cancel` to cancel",
+            "• Type `cancel` to cancel operation",
             "",
-            "**📝 Examples:**",
-            "• `2` → Material Receipt",
-            "• `Material Transfer` → By name",
+            "**📝 Quick Examples:**",
+            "• `2` → Select Material Receipt",
+            "• `Material Transfer` → Direct selection",
+            "• `cancel` → Cancel this operation",
             "",
-            "**ℹ️ Operation Types:**",
-            "• **Inbound:** Receive materials into warehouse",
-            "• **Outbound:** Issue materials from warehouse", 
-            "• **Transfer:** Move materials between warehouses",
-            "• **Production:** Manufacturing & repackaging operations"
+            "**ℹ️ Operation Categories:**",
+            "• **📥 Inbound:** Receive materials into warehouse",
+            "• **📤 Outbound:** Issue materials from warehouse",
+            "• **🔄 Transfer:** Move materials between warehouses",
+            "• **🏭 Production:** Manufacturing & repackaging operations",
+            "",
+            f"**🎯 Stock Entry Selection:**",
+            f"• **Total Operations:** {len(stock_entry_types)} available",
+            f"• **Categories:** 4 operation types",
+            f"• **Usage:** Essential for inventory management",
+            f"• **Impact:** Updates stock levels automatically"
         ])
+        
+        response_text = "\n".join(response_parts)
         
         # Find the actual field name for stock entry type from missing fields
         actual_field_name = "stock_entry_type"  # default
@@ -3540,13 +3946,13 @@ def show_stock_entry_type_selection(data, missing_fields, user):
         }
         set_conversation_state(user, state)
         
-        return "\n".join(response_parts)
+        return response_text
         
     except Exception as e:
         return f"Error showing stock entry type selection: {str(e)}"
 
 def show_company_selection(data, missing_fields, user, current_doctype=None):
-    """Show interactive selection for Company with beautiful HTML styling"""
+    """Show simple company selection interface"""
     try:
         # Get available companies
         companies = frappe.get_all("Company", 
@@ -3556,62 +3962,49 @@ def show_company_selection(data, missing_fields, user, current_doctype=None):
         company_names = [comp.name for comp in companies]
         
         if not company_names:
-            # If no companies found, ask for manual input
-            doctype_for_meta = current_doctype or "Stock Entry"
-            meta = frappe.get_meta(doctype_for_meta)
-            field_obj = meta.get_field("company")
-            label_to_ask = field_obj.label or "company"
-            
-            state = {
-                "action": "collect_fields",
-                "doctype": current_doctype or "Stock Entry",
-                "data": data,
-                "missing_fields": missing_fields
-            }
-            set_conversation_state(user, state)
-            
-            return f"What should I set as the {label_to_ask}?"
+            return """🏢 Select Company
+
+No companies found in the system.
+
+You can:
+• Type a company name directly
+• Type 'cancel' to cancel"""
         
-        # Create beautiful HTML structure like other selections
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">🏢</span>
-        <h4 class="nexchat-field-title">Select Company</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Available Companies</span>
-        <span class="nexchat-options-count">{len(companies)}</span>
-    </div>
-    
-    <div class="nexchat-options-grid">
-"""
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
         
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            "🏢 **Select Company**",
+            f"*Choose from {len(companies)} registered companies*\n"
+        ]
+        
+        # Add the beautiful company cards with circled numbers
+        response_parts.append("**🏭 Available Companies:**")
         for i, company in enumerate(companies, 1):
-            options_html += f"""
-        <div class="nexchat-option-item" onclick="selectOption('{company.name}')">
-            <div class="nexchat-option-badge">{i}</div>
-            <div class="nexchat-option-content">
-                <div class="nexchat-option-primary">{company.name}</div>
-            </div>
-        </div>
-"""
+            badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+            response_parts.append(f"{badge} **{company.name}**")
         
-        options_html += """
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for your choice</li>
-            <li>Type the <strong>company name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
+        response_parts.extend([
+            "",
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `2`) for your choice",
+            "• Type the **company name** directly",
+            "• Type `cancel` to cancel operation",
+            "",
+            "**📝 Quick Examples:**",
+            f"• `1` → Select **{companies[0].name}**" if companies else "",
+            f"• `{companies[0].name}` → Select by name" if companies else "",
+            "• `cancel` → Cancel this operation",
+            "",
+            f"**🎯 Company Selection:**",
+            f"• **Total Companies:** {len(companies)} available",
+            f"• **Field Type:** Company Link",
+            f"• **Usage:** This company will be used for all transactions",
+            f"• **Status:** Required for document creation"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Determine the doctype - prefer provided parameter, then detect from data
         if current_doctype:
@@ -3665,7 +4058,7 @@ def show_company_selection(data, missing_fields, user, current_doctype=None):
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing company selection: {str(e)}"
@@ -3673,67 +4066,73 @@ def show_company_selection(data, missing_fields, user, current_doctype=None):
 # show_items_selection function removed - replaced by generic child table system
 
 def show_warehouse_selection(field_name, data, missing_fields, user):
-    """Show interactive selection for Warehouse fields"""
+    """Show beautiful warehouse selection with HTML styling"""
     try:
         # Get available warehouses
         warehouses = frappe.get_all("Warehouse", 
                                   fields=["name", "warehouse_name"],
                                   order_by="name")
         
-        if not warehouses:
-            # If no warehouses found, ask for manual input
-            meta = frappe.get_meta("Stock Entry")
-            field_obj = meta.get_field(field_name)
-            label_to_ask = field_obj.label or field_name
-            
-            state = {
-                "action": "collect_fields",
-                "doctype": "Stock Entry",
-                "data": data,
-                "missing_fields": missing_fields
-            }
-            set_conversation_state(user, state)
-            
-            return f"What should I set as the {label_to_ask}?"
-        
         # Get field label for display
         meta = frappe.get_meta("Stock Entry")
         field_obj = meta.get_field(field_name)
         field_label = field_obj.label or field_name.replace("_", " ").title()
         
-        # Create formatted list with better styling
-        response_parts = [
-            f"🏪 **Select {field_label}:**\n"
-        ]
+        if not warehouses:
+            return f"""🏪 **Select {field_label}**
+
+**ℹ️ No Warehouses Available**
+
+**💡 What you can do:**
+• Type a **warehouse name** directly
+• Type `cancel` to cancel operation
+• Contact administrator to configure warehouses
+
+**🔧 Field Information:**
+• **Field:** {field_label}
+• **Type:** Warehouse Link
+• **Status:** No warehouses found"""
         
-        # Group warehouses by type if possible (you can extend this logic)
-        response_parts.append("**📦 Available Warehouses:**")
-        
-        # Unicode circled numbers for beautiful badges
+        # Unicode circled numbers for beautiful badges (purple theme)
         circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
         
+        # Create beautiful response with heavy markdown styling
         warehouse_names = []
+        response_parts = [
+            f"🏪 **Select {field_label}**",
+            f"*Choose from {len(warehouses)} available warehouses*\n"
+        ]
+        
+        # Add the beautiful warehouse cards with circled numbers
+        response_parts.append("**📦 Available Warehouses:**")
         for i, warehouse in enumerate(warehouses, 1):
-            warehouse_display = f"**{warehouse.name}**"
+            display_name = warehouse.name
             if warehouse.warehouse_name and warehouse.warehouse_name != warehouse.name:
-                warehouse_display += f" - _{warehouse.warehouse_name}_"
+                display_name += f" *({warehouse.warehouse_name})*"
             badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
-            response_parts.append(f"{badge} {warehouse_display}")
+            response_parts.append(f"{badge} **{display_name}**")
             warehouse_names.append(warehouse.name)
         
         response_parts.extend([
             "",
-            f"📊 **Total Warehouses:** {len(warehouses)}",
-            "",
             "**💡 How to select:**",
-            "• Type a **number** (e.g., `1`) for your choice",
-            "• Type the **warehouse name** directly", 
-            "• Type `cancel` to cancel",
+            "• Type a **number** (e.g., `3`) for your choice",
+            "• Type the **warehouse name** directly",
+            "• Type `cancel` to cancel operation",
             "",
-            "**📝 Examples:**",
-            f"• `1` → {warehouse_names[0] if warehouse_names else 'First Warehouse'}",
-            f"• `{warehouse_names[0] if warehouse_names else 'Stores'}` → By name"
+            "**📝 Quick Examples:**",
+            f"• `1` → Select **{warehouses[0].name}**" if warehouses else "",
+            f"• `{warehouses[0].name}` → Select by exact name" if warehouses else "",
+            "• `cancel` → Cancel this operation",
+            "",
+            f"**🎯 Warehouse Selection Details:**",
+            f"• **Field:** {field_label}",
+            f"• **Type:** Warehouse Link",
+            f"• **Available:** {len(warehouses)} warehouses",
+            f"• **Usage:** For stock operations and inventory management"
         ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state
         state = {
@@ -3745,7 +4144,7 @@ def show_warehouse_selection(field_name, data, missing_fields, user):
         }
         set_conversation_state(user, state)
         
-        return "\n".join(response_parts)
+        return response_text
         
     except Exception as e:
         return f"Error showing warehouse selection: {str(e)}" 
@@ -3765,19 +4164,24 @@ def show_asset_item_selection(data, missing_fields, user):
                                  fields=["item_code", "item_name"],
                                  order_by="item_code")
         
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        
+        # Create beautiful response with heavy markdown styling
         response_parts = [
-            "🏭 **Select Asset Item:**\n"
+            "🏭 **Select Asset Item**",
+            f"*Choose from {len(items)} asset-compatible items*\n" if items else "*No items available in system*\n"
         ]
         
         if items:
             item_codes = []
-            # Unicode circled numbers for beautiful badges
-            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
             
+            # Add the beautiful item cards with circled numbers
+            response_parts.append("**📦 Available Asset Items:**")
             for i, item in enumerate(items, 1):
-                item_display = f"{item.item_code}"
+                item_display = item.item_code
                 if item.item_name and item.item_name != item.item_code:
-                    item_display += f" ({item.item_name})"
+                    item_display += f" *({item.item_name})*"
                 badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
                 response_parts.append(f"{badge} **{item_display}**")
                 item_codes.append(item.item_code)
@@ -3785,16 +4189,34 @@ def show_asset_item_selection(data, missing_fields, user):
             response_parts.extend([
                 "",
                 "**💡 How to select:**",
-                "• Type a **number** (e.g., `1`) for your choice",
+                "• Type a **number** (e.g., `3`) for your choice",
                 "• Type the **item code** directly",
-                "• Type `cancel` to cancel\n",
-                f"**📝 Showing first {len(items)} items.**"
+                "• Type `cancel` to cancel operation",
+                "",
+                "**📝 Quick Examples:**",
+                f"• `1` → Select **{items[0].item_code}**" if items else "",
+                f"• `{items[0].item_code}` → Select by exact code" if items else "",
+                "• `cancel` → Cancel this operation",
+                "",
+                f"**🎯 Asset Item Selection Details:**",
+                f"• **Field:** Item Code (Asset)",
+                f"• **Type:** Item Link",
+                f"• **Available:** {len(items)} asset items",
+                f"• **Filter:** Fixed asset items only"
             ])
         else:
             response_parts.extend([
-                "No items found in system.",
+                "**ℹ️ No Asset Items Available**",
+                "",
+                "**💡 What you can do:**",
                 "• Type an **item code** directly",
-                "• Type `cancel` to cancel"
+                "• Type `cancel` to cancel operation",
+                "• Create asset items in Item master first",
+                "",
+                "**🔧 Item Information:**",
+                "• **Field:** Item Code",
+                "• **Type:** Item Link (Asset)",
+                "• **Status:** No asset items found"
             ])
             item_codes = []
         
@@ -3824,19 +4246,24 @@ def show_location_selection(data, missing_fields, user):
                                  fields=["name", "location_name"],
                                  order_by="name")
         
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        
+        # Create beautiful response with heavy markdown styling
         response_parts = [
-            "📍 **Select Asset Location:**\n"
+            "📍 **Select Asset Location**",
+            f"*Choose from {len(locations)} available locations*\n" if locations else "*No locations found in system*\n"
         ]
         
         if locations:
             location_names = []
-            # Unicode circled numbers for beautiful badges
-            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
             
+            # Add the beautiful location cards with circled numbers
+            response_parts.append("**🏢 Available Locations:**")
             for i, location in enumerate(locations, 1):
                 location_display = location.name
                 if location.location_name and location.location_name != location.name:
-                    location_display += f" ({location.location_name})"
+                    location_display += f" *({location.location_name})*"
                 badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
                 response_parts.append(f"{badge} **{location_display}**")
                 location_names.append(location.name)
@@ -3844,17 +4271,37 @@ def show_location_selection(data, missing_fields, user):
             response_parts.extend([
                 "",
                 "**💡 How to select:**",
-                "• Type a **number** (e.g., `1`) for your choice",
+                "• Type a **number** (e.g., `3`) for your choice",
                 "• Type the **location name** directly",
                 "• Type `new location name` to create it",
-                "• Type `cancel` to cancel\n",
-                f"**📝 Showing first {len(locations)} locations. You can also create new ones.**"
+                "• Type `cancel` to cancel operation",
+                "",
+                "**📝 Quick Examples:**",
+                f"• `1` → Select **{locations[0].name}**" if locations else "",
+                f"• `{locations[0].name}` → Select by exact name" if locations else "",
+                "• `Main Office` → Create new location",
+                "• `cancel` → Cancel this operation",
+                "",
+                f"**🎯 Asset Location Details:**",
+                f"• **Field:** Location",
+                f"• **Type:** Location Link",
+                f"• **Available:** {len(locations)} locations",
+                f"• **Feature:** Can create new locations instantly"
             ])
         else:
             response_parts.extend([
-                "No locations found in system.",
+                "**ℹ️ No Locations Available**",
+                "",
+                "**💡 What you can do:**",
                 "• Type a **location name** to create it",
-                "• Type `cancel` to cancel"
+                "• Type `cancel` to cancel operation",
+                "• Example: `Main Office`, `Warehouse 1`, `Factory Floor`",
+                "",
+                "**🔧 Location Information:**",
+                "• **Field:** Location",
+                "• **Type:** Location Link",
+                "• **Status:** No locations found",
+                "• **Feature:** Auto-create new locations"
             ])
             location_names = []
         
@@ -3897,14 +4344,25 @@ def show_asset_field_selection(field_name, data, missing_fields, user):
             field_label = "Asset Owner"
             icon = "👤"
         
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        
+        # Create beautiful response with heavy markdown styling
         response_parts = [
-            f"{icon} **Select {field_label}:**\n"
+            f"{icon} **Select {field_label}**",
+            f"*Choose from {len(field_data)} available {field_label.lower()}s*\n" if field_data else f"*No {field_label.lower()}s found in system*\n"
         ]
         
         if field_data:
             field_options = []
-            # Unicode circled numbers for beautiful badges
-            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+            
+            # Add the beautiful option cards with circled numbers
+            if field_name == "asset_category":
+                response_parts.append("**🏷️ Available Asset Categories:**")
+            elif field_name == "asset_owner":
+                response_parts.append("**👤 Available Asset Owners:**")
+            else:
+                response_parts.append(f"**📋 Available {field_label}s:**")
             
             for i, item in enumerate(field_data, 1):
                 item_display = item.name
@@ -3912,7 +4370,7 @@ def show_asset_field_selection(field_name, data, missing_fields, user):
                 if len(item) > 1:
                     second_field = list(item.values())[1]
                     if second_field and second_field != item.name:
-                        item_display += f" ({second_field})"
+                        item_display += f" *({second_field})*"
                 badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
                 response_parts.append(f"{badge} **{item_display}**")
                 field_options.append(item.name)
@@ -3920,16 +4378,34 @@ def show_asset_field_selection(field_name, data, missing_fields, user):
             response_parts.extend([
                 "",
                 "**💡 How to select:**",
-                "• Type a **number** (e.g., `1`) for your choice",
+                "• Type a **number** (e.g., `3`) for your choice",
                 "• Type the **name** directly",
-                "• Type `cancel` to cancel\n",
-                f"**📝 Showing first {len(field_data)} {field_label.lower()}s.**"
+                "• Type `cancel` to cancel operation",
+                "",
+                "**📝 Quick Examples:**",
+                f"• `1` → Select **{field_data[0].name}**" if field_data else "",
+                f"• `{field_data[0].name}` → Select by exact name" if field_data else "",
+                "• `cancel` → Cancel this operation",
+                "",
+                f"**🎯 {field_label} Selection Details:**",
+                f"• **Field:** {field_label}",
+                f"• **Type:** Link Field",
+                f"• **Available:** {len(field_data)} {field_label.lower()}s",
+                f"• **Usage:** Required for asset management"
             ])
         else:
             response_parts.extend([
-                f"No {field_label.lower()}s found in system.",
+                f"**ℹ️ No {field_label}s Available**",
+                "",
+                "**💡 What you can do:**",
                 "• Type a **name** directly",
-                "• Type `cancel` to cancel"
+                "• Type `cancel` to cancel operation",
+                f"• Create {field_label.lower()}s in master data first",
+                "",
+                f"**🔧 {field_label} Information:**",
+                f"• **Field:** {field_label}",
+                f"• **Type:** Link Field",
+                f"• **Status:** No {field_label.lower()}s found"
             ])
             field_options = []
         
@@ -3954,17 +4430,52 @@ def show_asset_field_selection(field_name, data, missing_fields, user):
 def show_asset_purchase_amount_selection(data, missing_fields, user):
     """Show input interface for Asset Gross Purchase Amount"""
     try:
+        # Create beautiful response with heavy markdown styling
         response_parts = [
-            "💰 **Enter Net Purchase Amount:**\n",
-            "This is the cost at which the asset was purchased.\n",
-            "**💡 How to enter:**",
-            "• Type the amount (e.g., `50000`, `25000.50`)",
-            "• Type `0` if no purchase amount",
-            "• Type `cancel` to cancel\n",
-            "**📝 Examples:**",
-            "• `50000` → ₹50,000",
-            "• `25000.50` → ₹25,000.50"
+            "💰 **Enter Asset Purchase Amount**",
+            "*Input the cost at which the asset was purchased*\n"
         ]
+        
+        # Add beautiful examples section
+        response_parts.extend([
+            "**📝 Amount Examples:**",
+            "• `50000` → ₹50,000 (Standard format)",
+            "• `25000.50` → ₹25,000.50 (With decimals)",
+            "• `100000` → ₹100,000 (Large amount)",
+            ""
+        ])
+        
+        response_parts.extend([
+            "**💰 Asset Purchase Amount Guidelines:**",
+            "• **Whole amounts:** `50000`, `100000`, `250000`",
+            "• **Decimal amounts:** `25000.50`, `99999.99`",
+            "• **Large amounts:** `1000000` (1 million), `5000000`",
+            "• **Zero amount:** `0` if no purchase cost",
+            "",
+            "**✅ Valid Format Examples:**",
+            "• `50000` → Fifty thousand rupees",
+            "• `25000.50` → Twenty-five thousand and fifty paise",
+            "• `1000000` → Ten lakh rupees",
+            "",
+            "**❌ Invalid Formats:**",
+            "• ~~`₹50000`~~ (No currency symbol needed)",
+            "• ~~`50,000`~~ (No commas allowed)",
+            "• ~~`50k`~~ (No abbreviations)",
+            "",
+            "**💡 How to enter:**",
+            "• Type the **amount as a number** directly",
+            "• Use **decimal point** for paise (e.g., `25000.50`)",
+            "• Type `0` if **no purchase cost** or unknown",
+            "• Type `cancel` to cancel operation",
+            "",
+            "**🎯 Asset Amount Details:**",
+            "• **Field:** Gross Purchase Amount",
+            "• **Type:** Currency Amount",
+            "• **Format:** Decimal number (no symbols)",
+            "• **Usage:** Used for depreciation calculations"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state - determine doctype from context
         current_doctype = "Asset"  # this function is specifically for Asset purchase amount
@@ -3979,13 +4490,13 @@ def show_asset_purchase_amount_selection(data, missing_fields, user):
         }
         set_conversation_state(user, state)
         
-        return "\n".join(response_parts)
+        return response_text
         
     except Exception as e:
         return f"Error showing purchase amount selection: {str(e)}"
 
 def show_generic_link_selection(field_name, field_label, link_doctype, data, missing_fields, user, current_doctype):
-    """Show interactive selection for any Link field with beautiful HTML styling"""
+    """Show simple selection for any Link field"""
     try:
         # Check if this doctype should use pagination (based on likely record count)
         pagination_doctypes = ["Currency", "Customer", "Supplier", "Item", "Employee", "User", "Contact", "Address"]
@@ -4030,74 +4541,55 @@ def show_generic_link_selection(field_name, field_label, link_doctype, data, mis
         
         record_names = []
         
-        if records:
-            record_names = [record.name for record in records]
-            
-            # Create beautiful HTML structure
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Available {link_doctype}s</span>
-        <span class="nexchat-options-count">{len(records)}</span>
-    </div>
-    
-    <div class="nexchat-options-grid">
-"""
-            
-            for i, record in enumerate(records, 1):
-                display_name = record.name
-                secondary_text = ""
-                if display_field and record.get(display_field) and record.get(display_field) != record.name:
-                    secondary_text = record.get(display_field)
-                
-                options_html += f"""
-        <div class="nexchat-option-item" onclick="selectOption('{record.name}')">
-            <div class="nexchat-option-badge">{i}</div>
-            <div class="nexchat-option-content">
-                <div class="nexchat-option-primary">{display_name}</div>
-                {f'<div class="nexchat-option-secondary">{secondary_text}</div>' if secondary_text else ''}
-            </div>
-        </div>
-"""
-            
-            options_html += """
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for your choice</li>
-            <li>Type the <strong>name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
-            
-        else:
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ No {link_doctype.lower()}s found</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
+        if not records:
+            return f"""{icon} Select {field_label}
+
+No {link_doctype.lower()}s found.
+
+You can:
+• Type a name directly
+• Type 'cancel' to cancel"""
+        
+        record_names = [record.name for record in records]
+        
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            f"{icon} **Select {field_label}**",
+            f"*Choose from {len(records)} available {link_doctype.lower()}s*\n"
+        ]
+        
+        # Add the beautiful option cards with circled numbers
+        response_parts.append(f"**📋 Available {link_doctype}s:**")
+        for i, record in enumerate(records, 1):
+            display_name = record.name
+            if display_field and record.get(display_field) and record.get(display_field) != record.name:
+                display_name += f" *({record.get(display_field)})*"
+            badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+            response_parts.append(f"{badge} **{display_name}**")
+        
+        response_parts.extend([
+            "",
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `3`) for your choice",
+            "• Type the **{} name** directly".format(link_doctype.lower()),
+            "• Type `cancel` to cancel operation",
+            "",
+            "**📝 Quick Examples:**",
+            f"• `1` → Select **{records[0].name}**" if records else "",
+            f"• `{records[0].name}` → Select by exact name" if records else "",
+            "• `cancel` → Cancel this operation",
+            "",
+            f"**🎯 {link_doctype} Selection Details:**",
+            f"• **Field:** {field_label}",
+            f"• **Type:** {link_doctype} Link",
+            f"• **Available:** {len(records)} {link_doctype.lower()}s",
+            f"• **Search:** Type any name for direct selection"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state
         state = {
@@ -4110,13 +4602,13 @@ def show_generic_link_selection(field_name, field_label, link_doctype, data, mis
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_paginated_link_selection(field_name, field_label, link_doctype, data, missing_fields, user, current_doctype, page=1):
-    """Show paginated link field selection with beautiful HTML styling"""
+    """Show paginated link field selection with beautiful HTML interface"""
     try:
         # Try to get a better display field
         link_meta = frappe.get_meta(link_doctype)
@@ -4137,9 +4629,9 @@ def show_paginated_link_selection(field_name, field_label, link_doctype, data, m
                                        order_by="name")
         
         # Pagination settings
-        items_per_page = 20
+        items_per_page = 15  # Reduced for better display
         total_items = len(all_records)
-        total_pages = (total_items + items_per_page - 1) // items_per_page  # Ceiling division
+        total_pages = (total_items + items_per_page - 1) // items_per_page
         
         # Calculate start and end indices for current page
         start_idx = (page - 1) * items_per_page
@@ -4160,114 +4652,78 @@ def show_paginated_link_selection(field_name, field_label, link_doctype, data, m
         icon = icons.get(link_doctype, "🔗")
         
         if not all_records:
-            # No records found
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ No {link_doctype.lower()}s found</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
-        else:
-            # Create beautiful paginated HTML structure
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Available {link_doctype}s</span>
-        <span class="nexchat-options-count">Page {page} of {total_pages} ({total_items} total)</span>
-    </div>
-    
-    <div class="nexchat-search-container">
-        <span class="nexchat-search-icon">🔍</span>
-        <input type="text" class="nexchat-search-input" placeholder="Search {link_doctype.lower()}s..." onkeyup="filterOptions(this.value)">
-    </div>
-    
-    <div class="nexchat-options-grid">
-"""
+            return f"""{icon} Select {field_label}
+
+No {link_doctype.lower()}s found.
+
+You can:
+• Type a {link_doctype.lower()} name directly
+• Type 'cancel' to cancel"""
+        
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            f"{icon} **Select {field_label}**",
+            f"*Page {page} of {total_pages} • {total_items} total {link_doctype.lower()}s available*\n"
+        ]
+        
+        # Add the beautiful option cards with circled numbers
+        response_parts.append(f"**📋 Available {link_doctype}s (Page {page}):**")
+        for i, record in enumerate(current_page_records, 1):
+            display_name = record.name
+            if display_field and record.get(display_field) and record.get(display_field) != record.name:
+                display_name += f" *({record.get(display_field)})*"
+            badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+            response_parts.append(f"{badge} **{display_name}**")
+        
+        # Add navigation info if multiple pages with beautiful styling
+        if total_pages > 1:
+            nav_info = []
+            if page > 1:
+                nav_info.append("`prev` ← Previous page")
+            if page < total_pages:
+                nav_info.append("`next` → Next page")
             
-            for i, record in enumerate(current_page_records, 1):
-                display_name = record.name
-                secondary_text = ""
-                if display_field and record.get(display_field) and record.get(display_field) != record.name:
-                    secondary_text = record.get(display_field)
-                
-                # Calculate global item number
-                global_num = start_idx + i
-                
-                options_html += f"""
-        <div class="nexchat-option-item" onclick="selectOption('{record.name}')">
-            <div class="nexchat-option-badge">{global_num}</div>
-            <div class="nexchat-option-content">
-                <div class="nexchat-option-primary">{display_name}</div>
-                {f'<div class="nexchat-option-secondary">{secondary_text}</div>' if secondary_text else ''}
-            </div>
-        </div>
-"""
-            
-            options_html += """
-    </div>
-"""
-            
-            # Add pagination controls if multiple pages
-            if total_pages > 1:
-                options_html += f"""
-    <div class="nexchat-pagination">
-        <div class="nexchat-pagination-info">
-            Page {page} of {total_pages} • Showing {len(current_page_records)} of {total_items} {link_doctype.lower()}s
-        </div>
-        <div class="nexchat-pagination-controls">
-"""
-                
-                if page > 1:
-                    options_html += f"""
-            <button class="nexchat-page-btn" onclick="selectOption('prev_page')">← Previous</button>
-"""
-                
-                if page < total_pages:
-                    options_html += f"""
-            <button class="nexchat-page-btn" onclick="selectOption('next_page')">Next →</button>
-"""
-                
-                options_html += """
-        </div>
-    </div>
-"""
-            
-            options_html += """
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for your choice</li>
-            <li>Type the <strong>name</strong> directly</li>
-"""
-            
-            if total_pages > 1:
-                options_html += """
-            <li>Type <code>next</code> or <code>prev</code> for navigation</li>
-"""
-            
-            options_html += """
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
+            if nav_info:
+                response_parts.extend([
+                    "",
+                    f"**🔄 Page Navigation:** {' | '.join(nav_info)}"
+                ])
+        
+        response_parts.extend([
+            "",
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `3`) from the list above",
+            f"• Type the **{link_doctype.lower()} name** directly",
+            "• Type `cancel` to cancel operation"
+        ])
+        
+        if total_pages > 1:
+            response_parts.extend([
+                "",
+                "**📖 Navigation Commands:**",
+                "• `next` → Go to next page of results",
+                "• `prev` → Go to previous page of results"
+            ])
+        
+        response_parts.extend([
+            "",
+            "**📝 Quick Examples:**",
+            f"• `1` → Select first {link_doctype.lower()} from current page",
+            f"• `{current_page_records[0].name}` → Direct selection by name" if current_page_records else "",
+            "• `cancel` → Cancel this operation",
+            "",
+            f"**🎯 {link_doctype} Selection Details:**",
+            f"• **Field:** {field_label}",
+            f"• **Current Page:** {page} of {total_pages}",
+            f"• **Total Available:** {total_items} {link_doctype.lower()}s",
+            f"• **Per Page:** {items_per_page} items",
+            f"• **Search:** Type any name for instant match"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state with pagination info
         state = {
@@ -4286,13 +4742,13 @@ def show_paginated_link_selection(field_name, field_label, link_doctype, data, m
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_generic_select_selection(field_name, field_label, options, data, missing_fields, user, current_doctype):
-    """Show interactive selection for any Select field with beautiful HTML styling"""
+    """Show beautiful selection for any Select field with heavy markdown styling"""
     try:
         # Parse options (they come as newline-separated string)
         option_list = [opt.strip() for opt in options.split('\n') if opt.strip()]
@@ -4301,99 +4757,56 @@ def show_generic_select_selection(field_name, field_label, options, data, missin
         if option_list and option_list[0] == '':
             option_list = option_list[1:]
         
-        if option_list:
-            # Determine if we need compact layout for many options
-            use_compact = len(option_list) > 10
-            grid_class = "nexchat-options-grid compact" if use_compact else "nexchat-options-grid"
-            
-            # Create beautiful HTML structure
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">⚙️</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Select</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Available Options</span>
-        <span class="nexchat-options-count">{len(option_list)}</span>
-    </div>
-"""
+        if not option_list:
+            return f"""📝 **Select {field_label}**
 
-            # Add search for large lists
-            if len(option_list) > 15:
-                options_html += """
-    <div class="nexchat-search-container">
-        <span class="nexchat-search-icon">🔍</span>
-        <input type="text" class="nexchat-search-input" placeholder="Search options..." onkeyup="filterOptions(this.value)">
-    </div>
-"""
-            
-            # Show first batch of options or use collapsible for very large lists
-            if len(option_list) > 30:
-                # Use collapsible sections for very large lists
-                options_html += f"""
-    <div class="nexchat-collapsible-section expanded">
-        <div class="nexchat-collapsible-header" onclick="toggleCollapsible(this)">
-            <span>Show All {len(option_list)} Options</span>
-            <span class="nexchat-collapsible-icon">▼</span>
-        </div>
-        <div class="nexchat-collapsible-content">
-            <div class="{grid_class}">
-"""
-            else:
-                options_html += f'<div class="{grid_class}">'
-            
-            for i, option in enumerate(option_list, 1):
-                options_html += f"""
-        <div class="nexchat-option-item" onclick="selectOption('{option}')">
-            <div class="nexchat-option-badge">{i}</div>
-            <div class="nexchat-option-content">
-                <div class="nexchat-option-primary">{option}</div>
-            </div>
-        </div>
-"""
-            
-            # Close the grid and collapsible if used
-            if len(option_list) > 30:
-                options_html += """
-            </div>
-        </div>
-    </div>
-"""
-            else:
-                options_html += "</div>"
-            
-            options_html += """
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for your choice</li>
-            <li>Type the <strong>option name</strong> directly</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
-        else:
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">⚙️</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Select</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ No options available</div>
-        <ul class="nexchat-help-list">
-            <li>Type <code>cancel</code> to cancel</li>
-            <li>Contact administrator to configure options</li>
-        </ul>
-    </div>
-</div>
-"""
+**ℹ️ No Options Available**
+
+**💡 What you can do:**
+• Type `cancel` to cancel this operation
+• Contact your **administrator** to configure field options
+• Check if this field should have predefined values
+
+**🔧 Field Information:**
+• **Field:** {field_label}
+• **Type:** Select (Dropdown)
+• **Status:** No options configured"""
+        
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        
+        # Create beautiful response with sections
+        response_parts = [
+            f"📝 **Select {field_label}**",
+            f"*Choose from {len(option_list)} available options*\n"
+        ]
+        
+        # Add the beautiful option cards with circled numbers
+        response_parts.append("**⚙️ Available Options:**")
+        for i, option in enumerate(option_list, 1):
+            badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+            response_parts.append(f"{badge} **{option}**")
+        
+        response_parts.extend([
+            "",
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `3`) for your choice",
+            "• Type the **option name** directly",
+            "• Type `cancel` to cancel operation",
+            "",
+            "**📝 Quick Examples:**",
+            f"• `1` → Select **{option_list[0]}**" if option_list else "",
+            f"• `{option_list[0]}` → Select by name" if option_list else "",
+            "• `cancel` → Cancel this operation",
+            "",
+            f"**🎯 Field Details:**",
+            f"• **Field:** {field_label}",
+            f"• **Options:** {len(option_list)} available",
+            f"• **Type:** Select (Dropdown)",
+            f"• **Required:** {'Yes' if field_name in missing_fields else 'Optional'}"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])  # Remove empty parts
         
         # Save state
         state = {
@@ -4406,49 +4819,71 @@ def show_generic_select_selection(field_name, field_label, options, data, missin
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_generic_currency_selection(field_name, field_label, data, missing_fields, user, current_doctype):
-    """Show beautifully styled currency input interface using HTML"""
+    """Show beautiful currency input interface with Markdown formatting"""
     try:
-        # Create beautiful HTML structure for currency input
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">💰</span>
-        <h4 class="nexchat-field-title">Enter {field_label}</h4>
-        <span class="nexchat-field-type">Currency</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to enter:</div>
-        <ul class="nexchat-help-list">
-            <li>Type the amount as a number</li>
-            <li>Use decimal point for cents (e.g., <code>25000.50</code>)</li>
-            <li>Type <code>0</code> if no amount</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-    
-    <div class="nexchat-examples-grid">
-        <div class="nexchat-example-item">50000</div>
-        <div class="nexchat-example-item">25000.50</div>
-        <div class="nexchat-example-item">100.99</div>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ Supported formats:</div>
-        <ul class="nexchat-help-list">
-            <li>Whole numbers: <code>1000</code>, <code>50000</code></li>
-            <li>Decimals: <code>1000.50</code>, <code>25.99</code></li>
-            <li>Large amounts: <code>1000000</code> (1 million)</li>
-        </ul>
-    </div>
-</div>
-"""
+        # Create examples
+        examples = ["50000", "25000.50", "100.99"]
+        
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            f"💰 **Enter {field_label}**",
+            f"*Input a currency amount for your {field_label.lower()}*\n"
+        ]
+        
+        # Add beautiful examples section
+        response_parts.extend([
+            "**📝 Amount Examples:**",
+            f"• `{examples[0]}` → ₹{examples[0]} (Perfect format)",
+            f"• `{examples[1]}` → ₹{examples[1]} (With decimals)",
+            f"• `{examples[2]}` → ₹{examples[2]} (Small amount)",
+            ""
+        ])
+        
+        response_parts.extend([
+            "**💰 Currency Amount Guidelines:**",
+            "• **Whole amounts:** `1000`, `50000`, `100000`",
+            "• **Decimal amounts:** `1000.50`, `25000.75`, `99.99`",
+            "• **Large amounts:** `1000000` (1 million), `5000000` (5 million)",
+            "• **Zero amount:** `0` if no value required",
+            "",
+            "**✅ Valid Format Examples:**",
+            "• `50000` → Fifty thousand",
+            "• `25000.50` → Twenty-five thousand and fifty cents",
+            "• `100.99` → One hundred and ninety-nine cents",
+            "• `1000000` → One million",
+            "",
+            "**❌ Invalid Formats:**",
+            "• ~~`₹50000`~~ (No currency symbol needed)",
+            "• ~~`50,000`~~ (No commas allowed)",
+            "• ~~`50k`~~ (No abbreviations)",
+            "",
+            "**💡 How to enter:**",
+            "• Type the **amount as a number** directly",
+            "• Use **decimal point** for cents (e.g., `25000.50`)",
+            "• Type `0` if **no amount** or zero value",
+            "• Type `cancel` to cancel operation",
+            "",
+            "**🚀 Pro Tips:**",
+            "• **Precision:** Use up to 2 decimal places for cents",
+            "• **Large amounts:** System handles millions/billions",
+            "• **Auto-conversion:** System converts to proper currency format",
+            "• **Validation:** Invalid amounts will be rejected with guidance",
+            "",
+            f"**🎯 Amount Input Details:**",
+            f"• **Field:** {field_label}",
+            f"• **Type:** Currency Amount (Number)",
+            f"• **Format:** Decimal number (no symbols)",
+            f"• **Range:** 0 to 999,999,999,999.99",
+            f"• **Status:** Required monetary input"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state
         state = {
@@ -4462,13 +4897,13 @@ def show_generic_currency_selection(field_name, field_label, data, missing_field
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} input: {str(e)}"
 
 def show_currency_link_selection(field_name, field_label, data, missing_fields, user, current_doctype, page=1):
-    """Show paginated currency selection with beautiful HTML styling"""
+    """Show paginated currency selection with beautiful HTML interface"""
     try:
         # Get available currencies
         all_currencies = frappe.get_all("Currency", 
@@ -4476,9 +4911,9 @@ def show_currency_link_selection(field_name, field_label, data, missing_fields, 
                                       order_by="name")
         
         # Pagination settings
-        items_per_page = 20
+        items_per_page = 15  # Reduced for better display
         total_items = len(all_currencies)
-        total_pages = (total_items + items_per_page - 1) // items_per_page  # Ceiling division
+        total_pages = (total_items + items_per_page - 1) // items_per_page
         
         # Calculate start and end indices for current page
         start_idx = (page - 1) * items_per_page
@@ -4488,125 +4923,107 @@ def show_currency_link_selection(field_name, field_label, data, missing_fields, 
         currency_names = [curr.name for curr in current_page_currencies]
         
         if not all_currencies:
-            # No currencies found
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">💱</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ No currencies found</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>currency code</strong> directly (e.g., USD, EUR)</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
-        else:
-            # Create beautiful paginated HTML structure
-            options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">💱</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Link</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Available Currencies</span>
-        <span class="nexchat-options-count">Page {page} of {total_pages} ({total_items} total)</span>
-    </div>
-    
-    <div class="nexchat-search-container">
-        <span class="nexchat-search-icon">🔍</span>
-        <input type="text" class="nexchat-search-input" placeholder="Search currencies..." onkeyup="filterOptions(this.value)">
-    </div>
-    
-    <div class="nexchat-options-grid">
-"""
-            
-            for i, currency in enumerate(current_page_currencies, 1):
-                display_name = currency.name
-                secondary_text = ""
-                if currency.currency_name and currency.currency_name != currency.name:
-                    secondary_text = currency.currency_name
-                if currency.symbol:
-                    secondary_text += f" ({currency.symbol})" if secondary_text else currency.symbol
-                
-                # Calculate global item number
-                global_num = start_idx + i
-                
-                options_html += f"""
-        <div class="nexchat-option-item" onclick="selectOption('{currency.name}')">
-            <div class="nexchat-option-badge">{global_num}</div>
-            <div class="nexchat-option-content">
-                <div class="nexchat-option-primary">{display_name}</div>
-                {f'<div class="nexchat-option-secondary">{secondary_text}</div>' if secondary_text else ''}
-            </div>
-        </div>
-"""
-            
-            options_html += """
-    </div>
-"""
-            
-            # Add pagination controls if multiple pages
-            if total_pages > 1:
-                options_html += f"""
-    <div class="nexchat-pagination">
-        <div class="nexchat-pagination-info">
-            Page {page} of {total_pages} • Showing {len(current_page_currencies)} of {total_items} currencies
-        </div>
-        <div class="nexchat-pagination-controls">
-"""
-                
-                if page > 1:
-                    options_html += f"""
-            <button class="nexchat-page-btn" onclick="selectOption('prev_page')">← Previous</button>
-"""
-                
-                if page < total_pages:
-                    options_html += f"""
-            <button class="nexchat-page-btn" onclick="selectOption('next_page')">Next →</button>
-"""
-                
-                options_html += """
-        </div>
-    </div>
-"""
-            
-            options_html += """
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for your choice</li>
-            <li>Type the <strong>currency code</strong> directly (e.g., USD, EUR)</li>
-"""
-            
-            if total_pages > 1:
-                options_html += """
-            <li>Type <code>next</code> or <code>prev</code> for navigation</li>
-"""
-            
-            options_html += """
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-</div>
-"""
+            return """💱 **Select Currency**
+
+ℹ️ No currencies found.
+
+**💡 How to proceed:**
+• Type a **currency code** directly (e.g., USD, EUR)
+• Type `cancel` to cancel
+
+**📋 Field:** Currency | **🔍 Status:** No currencies found"""
         
-        # Save state with pagination info
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        
+        # Create beautiful Markdown interface with heavy styling
+        popular_currencies = ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD", "SGD"]
+        popular_found = [curr for curr in all_currencies if curr.name in popular_currencies]
+        
+        response_parts = [
+            f"💱 **Select {field_label}**",
+            f"*Page {page} of {total_pages} • {total_items} total currencies available*\n"
+        ]
+        
+        # Add popular currencies section if available with beautiful formatting
+        if popular_found:
+            response_parts.append("**⭐ Popular Currencies:**")
+            for i, curr in enumerate(popular_found[:6], 1):  # Show top 6 popular currencies
+                symbol_text = f" `{curr.symbol}`" if curr.symbol else ""
+                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+                response_parts.append(f"{badge} **{curr.name}**{symbol_text}")
+            response_parts.append("")
+        
+        # Add currencies for current page with beautiful cards
+        response_parts.append(f"**💰 All Currencies (Page {page}/{total_pages}):**")
+        start_num = len(popular_found[:6]) + 1 if popular_found else 1
+        for i, currency in enumerate(current_page_currencies, start_num):
+            currency_display = currency.name
+            if currency.currency_name and currency.currency_name != currency.name:
+                currency_display += f" *({currency.currency_name})*"
+            if currency.symbol:
+                currency_display += f" `{currency.symbol}`"
+            badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+            response_parts.append(f"{badge} **{currency_display}**")
+        
+        # Add navigation info if multiple pages
+        if total_pages > 1:
+            nav_info = []
+            if page > 1:
+                nav_info.append("`prev` ← Previous page")
+            if page < total_pages:
+                nav_info.append("`next` → Next page")
+            
+            if nav_info:
+                response_parts.extend([
+                    "",
+                    f"**🔄 Page Navigation:** {' | '.join(nav_info)}"
+                ])
+        
+        response_parts.extend([
+            "",
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `3`) from the options above",
+            "• Type the **currency code** directly (e.g., `USD`, `INR`)",
+            "• Type a **popular currency** from the ⭐ section",
+            "• Type `cancel` to cancel operation"
+        ])
+        
+        if total_pages > 1:
+            response_parts.extend([
+                "",
+                "**📖 Navigation Commands:**",
+                "• `next` → Go to next page of currencies",
+                "• `prev` → Go to previous page of currencies"
+            ])
+        
+        response_parts.extend([
+            "",
+            "**📝 Quick Examples:**",
+            "• `1` → Select first currency from list",
+            "• `USD` → US Dollar (direct search)",
+            "• `INR` → Indian Rupee (direct search)",
+            "• `EUR` → Euro (direct search)",
+            "",
+            f"**🎯 Currency Selection Details:**",
+            f"• **Field:** {field_label}",
+            f"• **Current Page:** {page} of {total_pages}",
+            f"• **Total Available:** {total_items} currencies",
+            f"• **Search:** Type any currency code for instant match"
+        ])
+        
+        response_text = "\n".join(response_parts)
+        
+        # Save state with pagination info and all currency names for search
+        all_currency_names = [curr.name for curr in all_currencies]
         state = {
             "action": "collect_stock_selection",
             "selection_type": field_name,
             "doctype": current_doctype,
             "data": data,
             "missing_fields": missing_fields,
-            "numbered_options": currency_names,
+            "numbered_options": currency_names,  # Current page options
+            "all_currency_options": all_currency_names,  # All currencies for direct search
             "pagination": {
                 "current_page": page,
                 "total_pages": total_pages,
@@ -4616,61 +5033,84 @@ def show_currency_link_selection(field_name, field_label, data, missing_fields, 
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_generic_numeric_selection(field_name, field_label, fieldtype, data, missing_fields, user, current_doctype):
-    """Show beautifully styled numeric input interface using HTML"""
+    """Show simple numeric input interface"""
     try:
         # Create appropriate icon and examples based on field type
         if fieldtype == "Int":
             icon = "🔢"
-            examples = ["`100`", "`250`", "`1000`"]
-            description = f"whole number for {field_label.lower()}"
-            formats = ["Positive numbers: `100`, `250`", "Zero: `0`", "No negative values allowed"]
+            examples = ["100", "250", "1000"]
+            description = f"whole number"
         elif fieldtype == "Percent":
             icon = "📊" 
-            examples = ["`15`", "`25.5`", "`100`"]
-            description = f"percentage value for {field_label.lower()}"
-            formats = ["Whole percent: `15`, `50`", "Decimal percent: `25.5`, `12.75`", "Range: 0 to 100"]
+            examples = ["15", "25.5", "100"]
+            description = f"percentage (0-100)"
         else:  # Float
             icon = "💯"
-            examples = ["`100.50`", "`25.75`", "`1000.99`"]
-            description = f"decimal number for {field_label.lower()}"
-            formats = ["Decimals: `100.50`, `25.75`", "Whole numbers: `100`, `250`", "Scientific: `1e3` (1000)"]
+            examples = ["100.50", "25.75", "1000.99"]
+            description = f"decimal number"
         
-        # Create beautiful HTML structure
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">Enter {field_label}</h4>
-        <span class="nexchat-field-type">{fieldtype}</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to enter:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a {description}</li>
-            <li>Type <code>0</code> if no value</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
-    </div>
-    
-    <div class="nexchat-examples-grid">
-        {' '.join([f'<div class="nexchat-example-item">{example}</div>' for example in examples])}
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ Supported formats:</div>
-        <ul class="nexchat-help-list">
-            {''.join([f'<li>{format_item}</li>' for format_item in formats])}
-        </ul>
-    </div>
-</div>
-"""
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            f"{icon} **Enter {field_label}**",
+            f"*Input a {description} for this field*\n"
+        ]
+        
+        # Add beautiful examples section
+        response_parts.extend([
+            "**📝 Input Examples:**",
+            f"• `{examples[0]}` → Perfect format",
+            f"• `{examples[1]}` → Another example", 
+            f"• `{examples[2]}` → Large number format",
+            ""
+        ])
+        
+        # Add detailed instructions
+        if fieldtype == "Int":
+            response_parts.extend([
+                "**🔢 Integer Number Guidelines:**",
+                "• **Whole numbers only:** `100`, `2500`, `10000`",
+                "• **No decimals allowed:** ❌ `100.5` ✅ `100`",
+                "• **Positive numbers preferred:** `1` to `999999999`",
+                "• **Zero allowed:** `0` for no value"
+            ])
+        elif fieldtype == "Percent":
+            response_parts.extend([
+                "**📊 Percentage Guidelines:**",
+                "• **Range:** `0` to `100` percent",
+                "• **Decimals allowed:** `15.5`, `25.75`, `100.00`",
+                "• **Whole percentages:** `15`, `50`, `100`",
+                "• **Common values:** `10`, `15`, `18`, `25`"
+            ])
+        else:  # Float
+            response_parts.extend([
+                "**💯 Decimal Number Guidelines:**",
+                "• **Decimal format:** `100.50`, `25.75`, `1000.99`",
+                "• **Whole numbers:** `100`, `250`, `1000`",
+                "• **Scientific notation:** `1e3` (equals 1000)",
+                "• **High precision:** `123.456789`"
+            ])
+        
+        response_parts.extend([
+            "",
+            "**💡 How to enter:**",
+            f"• Type a {description} directly",
+            "• Type `0` if no value or zero amount",
+            "• Type `cancel` to cancel operation",
+            "",
+            f"**🎯 Field Information:**",
+            f"• **Field:** {field_label}",
+            f"• **Type:** {fieldtype} (Number)",
+            f"• **Format:** {description.title()}",
+            f"• **Status:** Required input"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state
         state = {
@@ -4684,13 +5124,13 @@ def show_generic_numeric_selection(field_name, field_label, fieldtype, data, mis
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} input: {str(e)}"
 
 def show_generic_date_selection(field_name, field_label, data, missing_fields, user, current_doctype):
-    """Show beautifully styled date selection interface using HTML"""
+    """Show simple date selection interface"""
     try:
         from datetime import date, timedelta
         
@@ -4706,62 +5146,52 @@ def show_generic_date_selection(field_name, field_label, data, missing_fields, u
             month_later.strftime("%Y-%m-%d")
         ]
         
-        # Create beautiful HTML structure
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">📅</span>
-        <h4 class="nexchat-field-title">Select {field_label}</h4>
-        <span class="nexchat-field-type">Date</span>
-    </div>
-    
-    <div class="nexchat-options-header">
-        <span class="nexchat-options-title">Quick Date Options</span>
-        <span class="nexchat-options-count">4</span>
-    </div>
-    
-    <div class="nexchat-date-options">
-        <div class="nexchat-date-option" onclick="selectOption('{today.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">1</div>
-            <div class="nexchat-date-primary">Today</div>
-            <div class="nexchat-date-secondary">{today.strftime('%Y-%m-%d')} ({today.strftime('%A')})</div>
-        </div>
+        # Get current year for examples
+        current_year = today.year
         
-        <div class="nexchat-date-option" onclick="selectOption('{tomorrow.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">2</div>
-            <div class="nexchat-date-primary">Tomorrow</div>
-            <div class="nexchat-date-secondary">{tomorrow.strftime('%Y-%m-%d')} ({tomorrow.strftime('%A')})</div>
-        </div>
+        # Unicode circled numbers for beautiful badges (purple theme)
+        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
         
-        <div class="nexchat-date-option" onclick="selectOption('{week_later.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">3</div>
-            <div class="nexchat-date-primary">Next Week</div>
-            <div class="nexchat-date-secondary">{week_later.strftime('%Y-%m-%d')} ({week_later.strftime('%A')})</div>
-        </div>
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            f"📅 **Select {field_label}**",
+            f"*Choose a date for your {field_label.lower()}*\n"
+        ]
         
-        <div class="nexchat-date-option" onclick="selectOption('{month_later.strftime("%Y-%m-%d")}')">
-            <div class="nexchat-option-badge">4</div>
-            <div class="nexchat-date-primary">Next Month</div>
-            <div class="nexchat-date-secondary">{month_later.strftime('%Y-%m-%d')} ({month_later.strftime('%A')})</div>
-        </div>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to select:</div>
-        <ul class="nexchat-help-list">
-            <li>Type a <strong>number</strong> (e.g., <code>1</code>) for quick options</li>
-            <li>Type a <strong>custom date</strong> in YYYY-MM-DD format</li>
-            <li>Type <code>cancel</code> to cancel</li>
-        </ul>
+        # Add beautiful quick date options with circled numbers
+        response_parts.extend([
+            "**⚡ Quick Date Options:**",
+            f"{circled_numbers[0]} **Today** - `{today.strftime('%Y-%m-%d')}` ({today.strftime('%A')})",
+            f"{circled_numbers[1]} **Tomorrow** - `{tomorrow.strftime('%Y-%m-%d')}` ({tomorrow.strftime('%A')})",
+            f"{circled_numbers[2]} **Next Week** - `{week_later.strftime('%Y-%m-%d')}` ({week_later.strftime('%A')})",
+            f"{circled_numbers[3]} **Next Month** - `{month_later.strftime('%Y-%m-%d')}` ({month_later.strftime('%A')})",
+            ""
+        ])
         
-        <div class="nexchat-examples-grid">
-            <div class="nexchat-example-item">2024-12-25</div>
-            <div class="nexchat-example-item">2024-06-15</div>
-            <div class="nexchat-example-item">2024-03-01</div>
-        </div>
-    </div>
-</div>
-"""
+        response_parts.extend([
+            "**💡 How to select:**",
+            "• Type a **number** (e.g., `2`) for quick date options",
+            "• Type a **custom date** in `YYYY-MM-DD` format",
+            "• Type `cancel` to cancel operation",
+            "",
+            "**📝 Custom Date Examples:**",
+            f"• `{current_year}-12-25` → Christmas {current_year}",
+            f"• `{current_year+1}-06-15` → Mid-year {current_year+1}",
+            f"• `{current_year+1}-03-01` → March 1st {current_year+1}",
+            "",
+            "**📋 Date Format Guidelines:**",
+            "• **Required format:** `YYYY-MM-DD` (4-digit year)",
+            "• **Valid examples:** `2024-12-31`, `2025-01-15`",
+            "• **Invalid examples:** ❌ `31/12/2024` ❌ `Dec 31 2024`",
+            "",
+            f"**🎯 Date Selection Details:**",
+            f"• **Field:** {field_label}",
+            f"• **Today's Date:** {today.strftime('%Y-%m-%d')} ({today.strftime('%A')})",
+            f"• **Format Required:** YYYY-MM-DD",
+            f"• **Quick Options:** 4 available above"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state
         state = {
@@ -4775,13 +5205,13 @@ def show_generic_date_selection(field_name, field_label, data, missing_fields, u
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_generic_text_input(field_name, field_label, data, missing_fields, user, current_doctype):
-    """Show beautifully styled text input interface using HTML"""
+    """Show simple text input interface"""
     try:
         # Get appropriate icon based on field type
         field_icons = {
@@ -4804,73 +5234,103 @@ def show_generic_text_input(field_name, field_label, data, missing_fields, user,
                 break
         
         # Create context-specific examples and instructions
-        examples = []
-        instructions = []
-        format_info = []
-        
         if "email" in field_name.lower():
-            instructions = ["Type a valid email address", "Type <code>cancel</code> to cancel"]
-            examples = ["john.doe@company.com", "admin@example.org", "user123@domain.co.in"]
-            format_info = ["Must contain @ symbol", "Must be a valid email format"]
+            examples = ["john.doe@company.com", "admin@example.org"]
         elif "phone" in field_name.lower() or "mobile" in field_name.lower():
-            instructions = ["Type a phone number", "Type <code>cancel</code> to cancel"]
-            examples = ["+91 9876543210", "+1 555-123-4567", "9876543210"]
-            format_info = ["With country code: +91 9876543210", "Without country code: 9876543210", "With dashes: 98765-43210"]
+            examples = ["+91 9876543210", "9876543210"]
         elif "name" in field_name.lower():
             if current_doctype == "User":
-                instructions = ["Type the person's full name", "Type <code>cancel</code> to cancel"]
-                examples = ["John Doe", "Mary Johnson", "Dr. Sarah Smith"]
+                examples = ["John Doe", "Mary Johnson"]
             elif current_doctype in ["Customer", "Supplier"]:
-                instructions = ["Type the company or person name", "Type <code>cancel</code> to cancel"]
-                examples = ["ABC Corporation", "XYZ Suppliers Ltd", "John's Trading Co"]
+                examples = ["ABC Corporation", "XYZ Suppliers Ltd"]
             else:
-                instructions = [f"Type the name for this {field_label.lower()}", "Type <code>cancel</code> to cancel"]
                 examples = ["John Doe", "ABC Corporation"]
         elif "address" in field_name.lower():
-            instructions = ["Type the complete address", "Type <code>cancel</code> to cancel"]
-            examples = ["123 Main Street, City, State, 12345", "Building A, Tech Park, Bangalore 560001"]
+            examples = ["123 Main Street, City, State", "Building A, Tech Park, Bangalore"]
         elif "website" in field_name.lower():
-            instructions = ["Type the website URL", "Type <code>cancel</code> to cancel"]
-            examples = ["https://www.company.com", "www.example.org", "company.co.in"]
+            examples = ["https://www.company.com", "www.example.org"]
         else:
-            # Generic text input
-            instructions = ["Type your text directly", "Type <code>cancel</code> to cancel"]
             examples = [f"Your {field_label.lower()} here"]
         
-        # Create beautiful HTML structure
-        options_html = f"""
-<div class="nexchat-field-container">
-    <div class="nexchat-field-header">
-        <span class="nexchat-field-icon">{icon}</span>
-        <h4 class="nexchat-field-title">Enter {field_label}</h4>
-        <span class="nexchat-field-type">Data</span>
-    </div>
-    
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">💡 How to enter:</div>
-        <ul class="nexchat-help-list">
-            {''.join([f'<li>{instruction}</li>' for instruction in instructions])}
-        </ul>
-    </div>
-    
-    <div class="nexchat-examples-grid">
-        {' '.join([f'<div class="nexchat-example-item">{example}</div>' for example in examples[:3]])}
-    </div>
-"""
+        # Create beautiful response with heavy markdown styling
+        response_parts = [
+            f"{icon} **Enter {field_label}**",
+            f"*Input text for your {field_label.lower()}*\n"
+        ]
         
-        if format_info:
-            options_html += f"""
-    <div class="nexchat-help-section">
-        <div class="nexchat-help-title">ℹ️ Supported formats:</div>
-        <ul class="nexchat-help-list">
-            {''.join([f'<li>{format_item}</li>' for format_item in format_info])}
-        </ul>
-    </div>
-"""
+        # Add beautiful examples section
+        response_parts.extend([
+            "**📝 Input Examples:**",
+            f"• `{examples[0]}` → Perfect format",
+            f"• `{examples[1] if len(examples) > 1 else examples[0]}` → Alternative example",
+            ""
+        ])
         
-        options_html += """
-</div>
-"""
+        # Add specific guidelines based on field type
+        if "email" in field_name.lower():
+            response_parts.extend([
+                "**📧 Email Guidelines:**",
+                "• **Format:** `username@domain.com`",
+                "• **Valid examples:** `john@company.com`, `admin@website.org`",
+                "• **Required parts:** Username + @ + Domain",
+                "• **Case:** Usually lowercase preferred"
+            ])
+        elif "phone" in field_name.lower() or "mobile" in field_name.lower():
+            response_parts.extend([
+                "**📱 Phone Guidelines:**",
+                "• **With country code:** `+91 9876543210`",
+                "• **Without code:** `9876543210`",
+                "• **Format options:** Numbers with/without spaces",
+                "• **Length:** Usually 10+ digits"
+            ])
+        elif "name" in field_name.lower():
+            response_parts.extend([
+                "**👤 Name Guidelines:**",
+                "• **Person names:** `John Doe`, `Mary Johnson`",
+                "• **Company names:** `ABC Corporation`, `XYZ Ltd`",
+                "• **Format:** Proper capitalization preferred",
+                "• **Length:** 2-100 characters typical"
+            ])
+        elif "address" in field_name.lower():
+            response_parts.extend([
+                "**📍 Address Guidelines:**",
+                "• **Complete format:** `Street, City, State, Country`",
+                "• **Example:** `123 Main St, New York, NY, USA`",
+                "• **Include:** Building/Street + City + State/Region",
+                "• **Postal code:** Include if available"
+            ])
+        elif "website" in field_name.lower():
+            response_parts.extend([
+                "**🌐 Website Guidelines:**",
+                "• **Full URL:** `https://www.company.com`",
+                "• **Simple format:** `www.company.com`",
+                "• **Protocol:** http:// or https:// preferred",
+                "• **Valid domains:** .com, .org, .net, etc."
+            ])
+        else:
+            response_parts.extend([
+                "**✏️ Text Input Guidelines:**",
+                "• **Free form text:** Type any relevant text",
+                "• **Length:** Keep reasonable length",
+                "• **Special chars:** Most characters allowed",
+                "• **Format:** No specific format required"
+            ])
+        
+        response_parts.extend([
+            "",
+            "**💡 How to enter:**",
+            "• Type your text **directly** in the chat",
+            "• Press **Enter** to submit your input",
+            "• Type `cancel` to cancel operation",
+            "",
+            f"**🎯 Field Information:**",
+            f"• **Field:** {field_label}",
+            f"• **Type:** Text Input",
+            f"• **Icon:** {icon}",
+            f"• **Status:** Required text input"
+        ])
+        
+        response_text = "\n".join([part for part in response_parts if part])
         
         # Save state
         state = {
@@ -4883,7 +5343,7 @@ def show_generic_text_input(field_name, field_label, data, missing_fields, user,
         }
         set_conversation_state(user, state)
         
-        return options_html
+        return response_text
         
     except Exception as e:
         return f"Error showing {field_label} input: {str(e)}"
@@ -4993,14 +5453,14 @@ def handle_child_table_field_input(message, state, user):
         
         # Handle numbered options first (for Link, Select, Date fields)
         if numbered_options and user_input.isdigit():
-            try:
-                num = int(user_input)
-                if 1 <= num <= len(numbered_options):
-                    selected_value = numbered_options[num - 1]
-                else:
-                    return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
-            except ValueError:
-                return f"❌ Invalid input. Please use numbers or direct input."
+                try:
+                    num = int(user_input)
+                    if 1 <= num <= len(numbered_options):
+                      selected_value = numbered_options[num - 1]
+                    else:
+                        return f"❌ Invalid number: {num}. Please use numbers between 1 and {len(numbered_options)}."
+                except ValueError:
+                        return f"❌ Invalid input. Please use numbers or direct input."
         else:
             # Handle direct input or non-numeric fields
             try:

@@ -142,7 +142,11 @@ class NexchatWidget {
         } else if (isHTMLResponse && sender === 'bot') {
             // Use HTML response directly
             messageContent = text;
+        } else if (sender === 'bot') {
+            // Process markdown for bot messages
+            messageContent = this.processMarkdown(text);
         } else {
+            // For user messages, just escape HTML
             messageContent = `<p>${this.escapeHtml(text)}</p>`;
         }
         
@@ -442,6 +446,52 @@ class NexchatWidget {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    processMarkdown(text) {
+        // Don't process if it's already HTML
+        if (text.includes('<') && text.includes('>')) {
+            return text;
+        }
+
+        // First escape basic HTML to prevent XSS, but preserve our markdown
+        let processed = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+        // Process markdown syntax
+        // Handle code blocks first (to prevent other formatting inside code)
+        processed = processed.replace(/`([^`]+)`/g, '<code>$1</code>');
+        
+        // Handle bold text
+        processed = processed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        
+        // Handle italic text (single asterisks, not part of bold)
+        processed = processed.replace(/(?:^|[^*])\*([^*]+)\*(?:[^*]|$)/g, function(match, content) {
+            // Get the character before and after the asterisks
+            const before = match.charAt(0) === '*' ? '' : match.charAt(0);
+            const after = match.charAt(match.length - 1) === '*' ? '' : match.charAt(match.length - 1);
+            return before + '<em>' + content + '</em>' + after;
+        });
+        
+        // Convert line breaks to HTML
+        processed = processed.replace(/\n/g, '<br>');
+        
+        // Handle bullet points
+        processed = processed.replace(/^• (.+)$/gm, '&nbsp;&nbsp;• $1');
+        
+        // Wrap in paragraph if it's a simple single line
+        if (!processed.includes('<br>') && !processed.includes('<strong>') && !processed.includes('<em>')) {
+            processed = `<p>${processed}</p>`;
+        } else {
+            // For multi-line content, wrap in a div
+            processed = `<div class="markdown-content">${processed}</div>`;
+        }
+        
+        return processed;
     }
 }
 
