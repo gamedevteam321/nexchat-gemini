@@ -1,3 +1,5 @@
+import os
+
 app_name = "nexchat"
 app_title = "Nexchat"
 app_publisher = "nexchar"
@@ -24,9 +26,37 @@ app_license = "mit"
 # Includes in <head>
 # ------------------
 
+# Automatically load all CSS files from public/css directory
+def get_all_css_files():
+	"""Get all CSS files from the public/css directory"""
+	css_dir = os.path.join(os.path.dirname(__file__), "public", "css")
+	css_files = []
+	if os.path.exists(css_dir):
+		for file in sorted(os.listdir(css_dir)):
+			if file.endswith(".css"):
+				# Use absolute path format for non-bundle CSS files
+				# This ensures proper resolution by Frappe's asset system
+				css_files.append(f"/assets/nexchat/css/{file}")
+	return css_files if css_files else ["/assets/nexchat/css/nexchat.css"]  # Fallback to default
+
+# Automatically load all JS files from public/js directory
+def get_all_js_files():
+	"""Get all JS files from the public/js directory"""
+	js_dir = os.path.join(os.path.dirname(__file__), "public", "js")
+	js_files = []
+	if os.path.exists(js_dir):
+		for file in sorted(os.listdir(js_dir)):
+			if file.endswith(".js"):
+				# Use absolute path format for non-bundle JS files
+				# This ensures proper resolution by Frappe's asset system
+				js_files.append(f"/assets/nexchat/js/{file}")
+	return js_files if js_files else ["/assets/nexchat/js/nexchat.js"]  # Fallback to default
+
 # include js, css files in header of desk.html
-app_include_css = "/assets/nexchat/css/nexchat.css"
-app_include_js = "/assets/nexchat/js/nexchat.js"
+# These are ADDED to the existing CSS/JS from Frappe, ERPNext, etc.
+# Frappe automatically merges app_include_css from all apps
+app_include_css = get_all_css_files()
+app_include_js = get_all_js_files()
 
 # include js, css files in header of web template
 # web_include_css = "/assets/nexchat/css/nexchat.css"

@@ -87,6 +87,33 @@ class NexchatWidget {
                 this.scrollToBottom();
             }, 100);
         });
+        
+        // Global event delegation for interactive buttons (fallback)
+        $(document).on('click', '.nexchat-option-button', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const $button = $(e.target).closest('.nexchat-option-button');
+            // Try both attr() and data() to get the value
+            const number = $button.attr('data-number') || $button.data('number');
+            let value = $button.attr('data-value');
+            
+            // If attr returns undefined, try data() (which decodes HTML entities)
+            if (!value || value === '') {
+                value = $button.data('value');
+            }
+            
+            console.log('Global handler - Button clicked - Number:', number, 'Value:', value, 'Value type:', typeof value); // Debug log
+            
+            if (number && value !== undefined && value !== null && value !== '') {
+                // Ensure value is a string
+                const valueStr = String(value);
+                console.log('Global handler - Calling selectOptionNumber with:', parseInt(number), valueStr);
+                this.selectOptionNumber(parseInt(number), valueStr);
+            } else {
+                console.error('Global handler - Missing data attributes - Number:', number, 'Value:', value);
+            }
+        });
     }
 
     toggleWidget() {
@@ -134,7 +161,9 @@ class NexchatWidget {
         
         // Check message type for special formatting
         const isRoleSelection = text.includes('Select Role(s) for') && text.includes('`');
-        const isHTMLResponse = text.includes('<div class="nexchat-') || text.includes('<div class="nexchat-options-container">') || text.includes('<div class="nexchat-field-container">');
+        const isDateSelection = text.includes('nexchat-date-selection') || text.includes('nexchat-date-button');
+        const isInteractiveSelection = text.includes('nexchat-interactive-selection') || text.includes('nexchat-option-button');
+        const isHTMLResponse = text.includes('<div class="nexchat-') || text.includes('<div class="nexchat-options-container">') || text.includes('<div class="nexchat-field-container">') || isDateSelection || isInteractiveSelection;
         
         let messageContent;
         if (isRoleSelection && sender === 'bot') {
@@ -158,13 +187,24 @@ class NexchatWidget {
 
         $('#nexchat-body').append(message);
 
-        // Add click handlers for interactive elements
+        // Add click handlers for interactive elements - scope to this message
         if (isRoleSelection) {
-            this.addRoleButtonHandlers();
+            this.addRoleButtonHandlers(message);
+        }
+        
+        if (isDateSelection) {
+            this.addDateButtonHandlers(message);
+        }
+        
+        if (isInteractiveSelection) {
+            // Use setTimeout to ensure DOM is ready
+            setTimeout(() => {
+                this.addInteractiveSelectionHandlers(message);
+            }, 50);
         }
         
         if (isHTMLResponse) {
-            this.addOptionHandlers();
+            this.addOptionHandlers(message);
         }
 
         if (animate) {
@@ -244,6 +284,52 @@ class NexchatWidget {
         this.handleUserInput();
     }
 
+    addDateButtonHandlers() {
+        // Handle date button clicks
+        $('.nexchat-date-button').off('click').on('click', function(e) {
+            e.preventDefault();
+            const dateValue = $(this).data('date');
+            if (dateValue) {
+                window.nexchat.selectDate(dateValue);
+            }
+        });
+    }
+
+    addInteractiveSelectionHandlers(messageElement) {
+        // Handle interactive option button clicks - scope to the specific message
+        const scope = messageElement || $('#nexchat-body');
+        
+        // Remove existing handlers and add new ones scoped to this message
+        scope.find('.nexchat-option-button').off('click.nexchat').on('click.nexchat', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const $button = $(this);
+            // Try both attr() and data() to get the value
+            const number = $button.attr('data-number') || $button.data('number');
+            let value = $button.attr('data-value');
+            
+            // If attr returns undefined, try data() (which decodes HTML entities)
+            if (!value || value === '') {
+                value = $button.data('value');
+            }
+            
+            console.log('Button clicked - Number:', number, 'Value:', value, 'Value type:', typeof value, 'Button HTML:', $button[0].outerHTML); // Debug log
+            
+            if (number && value !== undefined && value !== null && value !== '') {
+                // Ensure value is a string
+                const valueStr = String(value);
+                console.log('Calling selectOptionNumber with:', parseInt(number), valueStr);
+                window.nexchat.selectOptionNumber(parseInt(number), valueStr);
+            } else {
+                console.error('Missing data attributes - Number:', number, 'Value:', value, 'Button HTML:', $button[0].outerHTML);
+                // Try to get value from the button's text or other attributes
+                const buttonText = $button.find('.option-label').text();
+                console.log('Button text:', buttonText);
+            }
+        });
+    }
+
     addOptionHandlers() {
         // Handle option selection clicks
         $('.nexchat-option-item').off('click').on('click', function(e) {
@@ -282,6 +368,90 @@ class NexchatWidget {
         setTimeout(() => {
             this.handleUserInput();
         }, 100);
+    }
+
+    selectDate(dateValue) {
+        // Auto-fill the input with the selected date
+        const input = $('#nexchat-input');
+        input.val(dateValue);
+        input.focus();
+        
+        // Automatically submit the date selection
+        setTimeout(() => {
+            this.handleUserInput();
+        }, 100);
+    }
+
+    selectOptionNumber(number, value) {
+        console.log('selectOptionNumber called - Number:', number, 'Value:', value, 'Type:', typeof value); // Debug log
+        
+        // Mark button as selected
+        $('.nexchat-option-button').removeClass('selected');
+        $(`.nexchat-option-button[data-number="${number}"]`).addClass('selected');
+        
+        // Auto-fill the input with the NUMBER (1, 2, 3, etc.) so backend can map it to the actual value
+        const input = $('#nexchat-input');
+        
+        // CRITICAL: Enable input if it's disabled
+        if (input.prop('disabled')) {
+            console.log('Input was disabled, enabling it...');
+            input.prop('disabled', false);
+        }
+        
+        // Use the number, not the value - backend will look it up from numbered_options
+        const numberToSet = String(number);
+        
+        // Clear any existing value first
+        input.val('');
+        
+        // Set the value
+        input.val(numberToSet);
+        console.log('Input value set to NUMBER:', input.val(), 'Number:', number, 'Input element:', input[0]); // Debug log
+        
+        // Verify the value was set immediately
+        const immediateCheck = input.val();
+        if (immediateCheck !== numberToSet) {
+            console.error('Failed to set input value immediately! Expected:', numberToSet, 'Got:', immediateCheck);
+            // Try multiple methods
+            input[0].value = numberToSet; // Direct DOM manipulation
+            input.val(numberToSet); // jQuery method
+            input.trigger('input').trigger('change'); // Force events
+        }
+        
+        // Ensure input is visible and focused
+        input.show();
+        input.focus();
+        
+        // Double-check after a brief delay
+        setTimeout(() => {
+            const currentVal = input.val();
+            console.log('After delay - Input value:', currentVal, 'Expected:', numberToSet);
+            if (currentVal !== numberToSet) {
+                console.warn('Value mismatch after delay, setting again via direct DOM');
+                input[0].value = numberToSet;
+                input.val(numberToSet);
+            }
+        }, 10);
+        
+        // Automatically submit the selection after ensuring value is set
+        setTimeout(() => {
+            const finalVal = input.val() || input[0].value;
+            console.log('Submitting with NUMBER:', finalVal, 'Expected:', numberToSet); // Debug log
+            
+            if (finalVal === numberToSet || finalVal === String(number)) {
+                console.log('Value is correct, submitting...');
+                this.handleUserInput();
+            } else {
+                console.error('Value still wrong! Setting one more time and submitting...', 'Got:', finalVal, 'Expected:', numberToSet);
+                // Last resort - set directly and submit
+                input[0].value = numberToSet;
+                input.val(numberToSet);
+                // Wait a tiny bit then submit
+                setTimeout(() => {
+                    this.handleUserInput();
+                }, 50);
+            }
+        }, 200);
     }
 
     toggleCollapsible(header) {
@@ -380,20 +550,30 @@ class NexchatWidget {
     handleUserInput() {
         const input = $('#nexchat-input');
         const sendBtn = $('#nexchat-send');
-        const userInput = input.val().trim();
+        
+        // Get value from both jQuery and direct DOM (in case jQuery fails)
+        const userInput = (input.val() || input[0].value || '').trim();
+        
+        console.log('handleUserInput - Input value:', userInput, 'jQuery val:', input.val(), 'DOM value:', input[0].value);
 
-        if (!userInput || this.isTyping) return;
+        if (!userInput || this.isTyping) {
+            console.log('handleUserInput - Skipping: empty or typing');
+            return;
+        }
 
         // Add user message
         this.addMessage(userInput, 'user');
+        
+        // Clear input AFTER getting the value
         input.val('');
+        input[0].value = '';
 
         // Disable input while processing
         input.prop('disabled', true);
         sendBtn.prop('disabled', true);
         this.showTyping();
 
-        // Send to backend
+        // Send to backend with the user input
         this.sendToBackend(userInput)
             .then(response => {
                 this.hideTyping();

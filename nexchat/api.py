@@ -1,6 +1,7 @@
 import frappe
 import json
 import traceback
+import sys
 from frappe import _
 
 try:
@@ -58,8 +59,26 @@ def is_new_action_request(message):
 def process_message(message):
     """Main function called from the frontend to process user messages"""
     try:
+        # Validate input
+        if not message:
+            return {"response": "Please provide a message."}
+        
+        if not isinstance(message, str):
+            message = str(message)
+        
+        print(f"\n{'='*80}")
+        print(f"PROCESS_MESSAGE - Function Entry")
+        print(f"{'='*80}")
+        print(f"Message received: {message}")
+        
         user = frappe.session.user
+        if not user or user == "Guest":
+            return {"response": "Please login to use Nexchat."}
+        
+        print(f"User: {user}")
         state = get_conversation_state(user) or {}
+        print(f"State: {state}")
+        print(f"{'='*80}\n")
 
         # Check if user wants to cancel or start a new action during conversation
         if state and is_new_action_request(message):
@@ -99,30 +118,16 @@ def process_message(message):
         # Enhanced error logging for debugging
         import traceback
         error_msg = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
-        full_error = f"Nexchat Error: {error_msg}\nUser: {user}\nMessage: {message}\nTraceback: {traceback.format_exc()}"
+        user_info = frappe.session.user if hasattr(frappe, 'session') and hasattr(frappe.session, 'user') else "Unknown"
+        message_info = message if 'message' in locals() else "Unknown"
+        full_error = f"Nexchat Error: {error_msg}\nUser: {user_info}\nMessage: {message_info}\nTraceback: {traceback.format_exc()}"
         frappe.log_error(full_error, "Nexchat Processing Error")
         # Create beautiful error response with heavy markdown styling
-        error_msg = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
         response_parts = [
             "💥 **Nexchat Processing Error**",
             "*An unexpected error occurred while processing your request*\n",
             "**🚨 Error Details:**",
-            f"• `{error_msg}`",
-            "",
-            "**💡 What to try:**",
-            "• **Retry:** Try your request again",
-            "• **Rephrase:** Use different wording or approach",
-            "• **Simplify:** Break complex requests into smaller parts",
-            "",
-            "**🔧 Troubleshooting:**",
-            "• Check your request format and spelling",
-            "• Ensure you have proper permissions",
-            "• Try a basic command like 'help' or 'show all customers'",
-            "",
-            "**📞 Support:**",
-            "• Contact your system administrator if the error persists",
-            "• Report this error for system improvement",
-            "• Check ERPNext logs for detailed technical information"
+            f"• `{error_msg}`"
         ]
         return {"response": "\n".join(response_parts)}
 
@@ -225,17 +230,7 @@ def show_child_table_collection(doctype, child_table_field, data, missing_child_
             if len(optional_fields) > 5:
                 response_parts.append(f"  ... and {len(optional_fields) - 5} more optional fields")
         
-        response_parts.extend([
-            f"\n**🎯 Let's collect the first row of {child_table_label}:**",
-            "",
-            "**💡 How it works:**",
-            f"• I'll ask for each required field one by one",
-            f"• You can add multiple rows to the {child_table_label}",
-            f"• Type `skip` to skip optional fields",
-            f"• Type `cancel` to cancel {doctype} creation",
-            "",
-            "**🚀 Ready to start? Type `yes` to begin adding the first row.**"
-        ])
+        response_parts.append(f"\n**🎯 Let's collect the first row of {child_table_label}:**")
         
         # Save state for child table collection
         state = {
@@ -380,7 +375,7 @@ def start_child_field_collection(state, user):
         return f"Error starting field collection: {str(e)}"
 
 def show_child_table_link_selection(field_name, field_label, link_doctype, state, user, child_table_label, row_number):
-    """Show numbered options for Link fields in child tables with simple text interface"""
+    """Show interactive selection for Link fields in child tables"""
     try:
         # Get available records for the link doctype
         records = frappe.get_all(link_doctype, 
@@ -410,111 +405,51 @@ def show_child_table_link_selection(field_name, field_label, link_doctype, state
         }
         icon = icons.get(link_doctype, "🔗")
         
-        record_names = []
+        if not records:
+            return f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n\nℹ️ No {link_doctype.lower()}s found.\n\n• Type a **name** directly\n• Type `cancel` to cancel"
         
-        if records:
-            record_names = [record.name for record in records]
-            
-            # Unicode circled numbers for beautiful badges (purple theme)
-            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
-            
-            # Create beautiful response with heavy markdown styling
-            response_parts = [
-                f"{icon} **{child_table_label} Row {row_number} - {field_label}**",
-                f"*Choose from {len(records)} available {link_doctype.lower()}s*\n"
-            ]
-            
-            # Add the beautiful option cards with circled numbers
-            response_parts.append(f"**📋 Available {link_doctype}s:**")
-            for i, record in enumerate(records, 1):
-                display_name = record.name
-                if display_field and record.get(display_field) and record.get(display_field) != record.name:
-                    display_name += f" *({record.get(display_field)})*"
-                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
-                response_parts.append(f"{badge} **{display_name}**")
-            
-            response_parts.extend([
-                "",
-                "**💡 How to select:**",
-                "• Type a **number** (e.g., `3`) for your choice",
-                "• Type the **{} name** directly".format(link_doctype.lower()),
-                "• Type `cancel` to cancel operation",
-                "",
-                "**📝 Quick Examples:**",
-                f"• `1` → Select **{records[0].name}**" if records else "",
-                f"• `{records[0].name}` → Select by exact name" if records else "",
-                "• `cancel` → Cancel this operation",
-                "",
-                f"**🎯 Row {row_number} {link_doctype} Selection:**",
-                f"• **Field:** {field_label}",
-                f"• **Row:** {row_number} in {child_table_label}",
-                f"• **Available:** {len(records)} {link_doctype.lower()}s",
-                f"• **Search:** Type any name for direct selection"
-            ])
-            
-            options_text = "\n".join(response_parts)
-        else:
-            options_text = f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n\nℹ️ No {link_doctype.lower()}s found.\n\n• Type a **name** directly\n• Type `cancel` to cancel"
+        record_names = [record.name for record in records]
+        
+        # Create options with labels
+        options_with_labels = []
+        for record in records:
+            display_name = record.name
+            if display_field and record.get(display_field) and record.get(display_field) != record.name:
+                display_name = f"{record.name} ({record.get(display_field)})"
+            options_with_labels.append({"value": record.name, "label": display_name})
+        
+        # Create interactive HTML
+        html_response = create_interactive_selection_html("link", f"{child_table_label} Row {row_number} - {field_label}", options_with_labels, field_name, icon)
         
         # Save state for child table field collection
         state["numbered_options"] = record_names
         set_conversation_state(user, state)
         
-        return options_text
+        return html_response
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_child_table_select_selection(field_name, field_label, options, state, user, child_table_label, row_number):
-    """Show numbered options for Select fields in child tables with simple text formatting"""
+    """Show interactive selection for Select fields in child tables"""
     try:
         # Parse options (they come as newline-separated string)
         option_list = [opt.strip() for opt in options.split('\n') if opt.strip()]
         
-        if option_list:
-            # Unicode circled numbers for beautiful badges (purple theme)
-            circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
-            
-            # Create beautiful response with heavy markdown styling
-            response_parts = [
-                f"⚙️ **{child_table_label} Row {row_number} - {field_label}**",
-                f"*Choose from {len(option_list)} available options*\n"
-            ]
-            
-            # Add the beautiful option cards with circled numbers
-            response_parts.append("**⚙️ Available Options:**")
-            for i, option in enumerate(option_list, 1):
-                badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
-                response_parts.append(f"{badge} **{option}**")
-            
-            response_parts.extend([
-                "",
-                "**💡 How to select:**",
-                "• Type a **number** (e.g., `3`) for your choice",
-                "• Type the **option name** directly",
-                "• Type `cancel` to cancel operation",
-                "",
-                "**📝 Quick Examples:**",
-                f"• `1` → Select **{option_list[0]}**" if option_list else "",
-                f"• `{option_list[0]}` → Select by exact name" if option_list else "",
-                "• `cancel` → Cancel this operation",
-                "",
-                f"**🎯 Row {row_number} Option Selection:**",
-                f"• **Field:** {field_label}",
-                f"• **Row:** {row_number} in {child_table_label}",
-                f"• **Options:** {len(option_list)} available",
-                f"• **Type:** Select (Dropdown)"
-            ])
-            
-            options_text = "\n".join(response_parts)
-        else:
-            options_text = f"⚙️ **{child_table_label} Row {row_number} - {field_label}**\n\nℹ️ No options available.\n\n• Type `cancel` to cancel\n• Contact administrator to configure options"
+        if not option_list:
+            return f"⚙️ **{child_table_label} Row {row_number} - {field_label}**\n\nℹ️ No options available.\n\n• Type `cancel` to cancel\n• Contact administrator to configure options"
+        
+        # Convert to format with value and label
+        options_with_labels = [{"value": opt, "label": opt} for opt in option_list]
+        
+        # Create interactive HTML
+        html_response = create_interactive_selection_html("select", f"{child_table_label} Row {row_number} - {field_label}", options_with_labels, field_name, "⚙️")
         
         # Save state for child table field collection
         state["numbered_options"] = option_list
         set_conversation_state(user, state)
         
-        return options_text
+        return html_response
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
@@ -581,12 +516,6 @@ def show_child_table_date_selection(field_name, field_label, state, user, child_
             ""
         ])
         
-        response_parts.extend([
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `2`) for quick date options",
-            "• Type a **custom date** in `YYYY-MM-DD` format",
-            "• Type `cancel` to cancel operation"
-        ])
         
         # Add specific instructions for delivery date
         if field_name == "delivery_date":
@@ -598,11 +527,6 @@ def show_child_table_date_selection(field_name, field_label, state, user, child_
             ])
         
         response_parts.extend([
-            "",
-            "**📝 Custom Date Examples:**",
-            f"• `{future_date1}` → Christmas {current_year}",
-            f"• `{future_date2}` → Mid-year {current_year + 1}",
-            f"• `{future_date3}` → March 1st {current_year + 1}",
             "",
             f"**🎯 Row {row_number} Date Selection:**",
             f"• **Field:** {field_label}",
@@ -649,11 +573,6 @@ def show_child_table_numeric_input(field_name, field_label, fieldtype, state, us
         response_parts = [
             f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n",
             f"Enter a {description}\n",
-            "**💡 How to enter:**",
-            f"• Type a {description}",
-            "• Type `0` if no value",
-            "• Type `cancel` to cancel\n",
-            f"**📝 Examples:** `{examples[0]}`, `{examples[1]}`, `{examples[2]}`\n",
             "**ℹ️ Supported formats:**"
         ]
         
@@ -694,12 +613,7 @@ def show_child_table_text_input(field_name, field_label, fieldtype, state, user,
         
         # Create simple text-based interface
         response_parts = [
-            f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n",
-            "**💡 How to enter:**",
-            "• Type your text directly",
-            "• Type `cancel` to cancel",
-            "",
-            f"**📝 Example:** `{example}`"
+            f"{icon} **{child_table_label} Row {row_number} - {field_label}**\n"
         ]
         
         options_text = "\n".join(response_parts)
@@ -1109,53 +1023,197 @@ def test_child_table_fields(child_doctype):
 def handle_field_collection(message, state, user):
     """Handle collection of required fields for document creation"""
     try:
-        # Add the new piece of information
-        field_to_collect = state["missing_fields"][0]
-        state["data"][field_to_collect] = message.strip()
-
-        # Remove the collected field from the list of missing fields
-        state["missing_fields"].pop(0)
-
-        # Check if we still have missing fields
+        doctype = state["doctype"]
+        stage = state.get("stage", "collecting_mandatory")
+        
+        # Check if user is responding to optional fields question
+        if stage == "asking_optional":
+            message_lower = message.strip().lower()
+            if message_lower in ["yes", "y", "fill more", "add more", "more"]:
+                # User wants to fill optional fields
+                optional_fields = state.get("optional_fields", [])
+                if optional_fields:
+                    state["missing_fields"] = optional_fields
+                    state["stage"] = "collecting_optional"
+                    field_to_ask = optional_fields[0]
+                    meta = frappe.get_meta(doctype)
+                    field_obj = meta.get_field(field_to_ask)
+                    label_to_ask = field_obj.label if field_obj else field_to_ask.replace("_", " ").title()
+                    set_conversation_state(user, state)
+                    
+                    if field_obj:
+                        return f"Great! Let's fill optional fields.\n\n" + get_smart_field_selection(field_to_ask, field_obj, state["data"], optional_fields, user, doctype)
+                    else:
+                        return f"Great! Let's fill optional fields.\n\nWhat should I set as the {label_to_ask}?"
+                else:
+                    # No optional fields available, check for child tables
+                    missing_child_tables = get_required_child_tables(doctype)
+                    missing_child_tables = [ct for ct in missing_child_tables if ct not in state["data"] or not state["data"].get(ct)]
+                    if missing_child_tables:
+                        return show_child_table_collection(doctype, missing_child_tables[0], state["data"], missing_child_tables, user)
+                    clear_conversation_state(user)
+                    return create_document(doctype, state["data"], user)
+            
+            elif message_lower in ["submit", "create", "no", "n", "skip", "done", "finish"]:
+                # User wants to submit/create the document, check for child tables first
+                missing_child_tables = get_required_child_tables(doctype)
+                missing_child_tables = [ct for ct in missing_child_tables if ct not in state["data"] or not state["data"].get(ct)]
+                if missing_child_tables:
+                    return show_child_table_collection(doctype, missing_child_tables[0], state["data"], missing_child_tables, user)
+                # Clear state and create the document
+                clear_conversation_state(user)
+                return create_document(doctype, state["data"], user)
+            else:
+                # Invalid input when asking for confirmation - show error and ask again
+                optional_fields = state.get("optional_fields", [])
+                if optional_fields:
+                    response_parts = [
+                        "❌ **Invalid response**\n",
+                        "**What would you like to do next?**",
+                        "",
+                        "• Type `fill more` or `yes` to add optional fields",
+                        "• Type `submit` or `create` to create the document now"
+                    ]
+                else:
+                    response_parts = [
+                        "❌ **Invalid response**\n",
+                        "**What would you like to do next?**",
+                        "",
+                        "• Type `submit` or `create` to create the document now",
+                        "• (No optional fields available)"
+                    ]
+                return "\n".join(response_parts)
+        
+        # Normal field collection
         if state["missing_fields"]:
-            # Still have more fields to collect
-            field_to_ask = state["missing_fields"][0]
-            doctype = state["doctype"]
-            
-            # Stock Entry specific hardcoded logic removed - now handled by generic system
-            
-            # Special handling for Asset fields with interactive selection
-            if doctype == "Asset":
-                if field_to_ask == "company":
-                    return show_company_selection(state["data"], state["missing_fields"], user, "Asset")
-                elif field_to_ask == "item_code":
-                    return show_asset_item_selection(state["data"], state["missing_fields"], user)
-                elif field_to_ask == "location":
-                    return show_location_selection(state["data"], state["missing_fields"], user)
-                elif field_to_ask in ["asset_category", "asset_owner"]:
-                    return show_asset_field_selection(field_to_ask, state["data"], state["missing_fields"], user)
-            
-            # Default field collection
-            meta = frappe.get_meta(doctype)
-            field_obj = meta.get_field(field_to_ask)
-            label_to_ask = field_obj.label or field_to_ask
-            
-            # Update conversation state with the new data
-            set_conversation_state(user, state)
-            
-            return f"Great! Now, what should I set as the {label_to_ask}?"
+            # Add the new piece of information
+            field_to_collect = state["missing_fields"][0]
+            state["data"][field_to_collect] = message.strip()
+
+            # Remove the collected field from the list of missing fields
+            state["missing_fields"].pop(0)
+
+            # Check if we still have missing fields
+            if state["missing_fields"]:
+                # Still have more fields to collect
+                field_to_ask = state["missing_fields"][0]
+                
+                # Stock Entry specific hardcoded logic removed - now handled by generic system
+                
+                # Special handling for Asset fields with interactive selection
+                if doctype == "Asset":
+                    if field_to_ask == "company":
+                        return show_company_selection(state["data"], state["missing_fields"], user, "Asset")
+                    elif field_to_ask == "item_code":
+                        return show_asset_item_selection(state["data"], state["missing_fields"], user)
+                    elif field_to_ask == "location":
+                        return show_location_selection(state["data"], state["missing_fields"], user)
+                    elif field_to_ask in ["asset_category", "asset_owner"]:
+                        return show_asset_field_selection(field_to_ask, state["data"], state["missing_fields"], user)
+                
+                # Default field collection
+                meta = frappe.get_meta(doctype)
+                field_obj = meta.get_field(field_to_ask)
+                label_to_ask = field_obj.label if field_obj else field_to_ask.replace("_", " ").title()
+                
+                # Update conversation state with the new data
+                set_conversation_state(user, state)
+                
+                return f"Great! Now, what should I set as the {label_to_ask}?"
+            else:
+                # All fields in current collection are done - check what stage we're in
+                if stage == "collecting_mandatory" or (stage != "collecting_optional" and stage != "asking_optional"):
+                    # All mandatory fields collected - always ask if user wants to submit or fill optional fields
+                    optional_fields = state.get("optional_fields", [])
+                    # Always ask, even if there are no optional fields
+                    state["stage"] = "asking_optional"
+                    set_conversation_state(user, state)
+                    
+                    if optional_fields:
+                        # Ask if user wants to fill optional fields
+                        response_parts = [
+                            "✅ **All mandatory fields completed!**\n",
+                            "**What would you like to do next?**",
+                            "",
+                            "• Type `fill more` or `yes` to add optional fields",
+                            "• Type `submit` or `create` to create the document now"
+                        ]
+                    else:
+                        # No optional fields available, but still ask for confirmation
+                        response_parts = [
+                            "✅ **All mandatory fields completed!**\n",
+                            "**What would you like to do next?**",
+                            "",
+                            "• Type `submit` or `create` to create the document now",
+                            "• (No optional fields available)"
+                        ]
+                    return "\n".join(response_parts)
+                elif stage == "collecting_optional":
+                    # All optional fields collected, check for child tables
+                    missing_child_tables = get_required_child_tables(doctype)
+                    missing_child_tables = [ct for ct in missing_child_tables if ct not in state["data"] or not state["data"].get(ct)]
+                    if missing_child_tables:
+                        return show_child_table_collection(doctype, missing_child_tables[0], state["data"], missing_child_tables, user)
+                    # Clear state and create the document
+                    clear_conversation_state(user)
+                    return create_document(doctype, state["data"], user)
+                else:
+                    # Unknown stage, but all fields collected - ask for confirmation to be safe
+                    optional_fields = state.get("optional_fields", [])
+                    state["stage"] = "asking_optional"
+                    set_conversation_state(user, state)
+                    
+                    if optional_fields:
+                        response_parts = [
+                            "✅ **All mandatory fields completed!**\n",
+                            "**What would you like to do next?**",
+                            "",
+                            "• Type `fill more` or `yes` to add optional fields",
+                            "• Type `submit` or `create` to create the document now"
+                        ]
+                    else:
+                        response_parts = [
+                            "✅ **All mandatory fields completed!**\n",
+                            "**What would you like to do next?**",
+                            "",
+                            "• Type `submit` or `create` to create the document now",
+                            "• (No optional fields available)"
+                        ]
+                    return "\n".join(response_parts)
         else:
-            # All fields collected
-            doctype = state["doctype"]
-            data = state["data"]
+            # No missing fields in state - this shouldn't happen, but ask for confirmation to be safe
+            optional_fields = state.get("optional_fields", [])
+            stage = state.get("stage", "collecting_mandatory")
             
-            # Hardcoded Stock Entry check removed - now handled by generic child table system
-            
-            # Clear conversation state since we're done collecting
-            clear_conversation_state(user)
-            
-            # Create the document
-            return create_document(doctype, data, user)
+            if stage != "asking_optional":
+                state["stage"] = "asking_optional"
+                set_conversation_state(user, state)
+                
+                if optional_fields:
+                    response_parts = [
+                        "✅ **All mandatory fields completed!**\n",
+                        "**What would you like to do next?**",
+                        "",
+                        "• Type `fill more` or `yes` to add optional fields",
+                        "• Type `submit` or `create` to create the document now"
+                    ]
+                else:
+                    response_parts = [
+                        "✅ **All mandatory fields completed!**\n",
+                        "**What would you like to do next?**",
+                        "",
+                        "• Type `submit` or `create` to create the document now",
+                        "• (No optional fields available)"
+                    ]
+                return "\n".join(response_parts)
+            else:
+                # Already asking, but somehow got here - check for child tables and create
+                missing_child_tables = get_required_child_tables(doctype)
+                missing_child_tables = [ct for ct in missing_child_tables if ct not in state["data"] or not state["data"].get(ct)]
+                if missing_child_tables:
+                    return show_child_table_collection(doctype, missing_child_tables[0], state["data"], missing_child_tables, user)
+                clear_conversation_state(user)
+                return create_document(doctype, state["data"], user)
     
     except Exception as e:
         clear_conversation_state(user)
@@ -1367,6 +1425,11 @@ def handle_pagination_navigation(state, new_page, user):
 def handle_stock_selection_collection(message, state, user):
     """Handle collection of stock entry field selections"""
     try:
+        # Check if we're in asking_optional stage - if so, route to handle_field_collection
+        stage = state.get("stage")
+        if stage == "asking_optional":
+            return handle_field_collection(message, state, user)
+        
         selection_type = state.get("selection_type")
         data = state.get("data")
         missing_fields = state.get("missing_fields")
@@ -1376,7 +1439,7 @@ def handle_stock_selection_collection(message, state, user):
         # Debug: Log the function entry state (truncated to avoid "Value too big" error)
         try:
             field_count = len(missing_fields) if missing_fields else 0
-            frappe.log_error(f"Function entry: field_count={field_count}", "Function Entry Debug")
+            frappe.log_error(f"Function entry: field_count={field_count}, selection_type={selection_type}", "Function Entry Debug")
         except:
             pass
         
@@ -1455,8 +1518,12 @@ def handle_stock_selection_collection(message, state, user):
             except ValueError:
                 return f"❌ Invalid number. Please enter a valid {state.get('field_type', 'number').lower()}."
         
+        # Check if we should use numbered options - only if selection_type matches the current field being collected
+        current_field = missing_fields[0] if missing_fields else None
+        should_use_numbered_options = (numbered_options and selection_type and selection_type == current_field)
+        
         # Check if input is a number (for numbered options)
-        elif user_input.isdigit() and numbered_options:
+        if user_input.isdigit() and should_use_numbered_options:
             try:
                 num = int(user_input)
                 if 1 <= num <= len(numbered_options):
@@ -1487,7 +1554,8 @@ def handle_stock_selection_collection(message, state, user):
                         return f"Multiple currencies found matching '{user_input}': {match_list}. Please be more specific."
                     else:
                         return f"Currency '{user_input}' not found. Please use numbers (e.g., 1, 2, 3) or exact currency codes like USD, INR, EUR."
-            elif numbered_options:
+            elif should_use_numbered_options:
+                # Only use numbered options if selection_type matches the current field being collected
                 # Standard search for non-currency fields
                 # First try exact match (case-insensitive)
                 exact_matches = [opt for opt in numbered_options if opt.lower() == user_input.lower()]
@@ -1505,7 +1573,7 @@ def handle_stock_selection_collection(message, state, user):
                     else:
                         return f"Option '{user_input}' not found. Please use numbers (e.g., 1, 2, 3) or exact option names."
             else:
-                # If no numbered options, treat as direct input
+                # If no numbered options or not the right field, treat as direct input
                 selected_value = user_input
         
         # Get current doctype from state early - needed for Payment Entry logic
@@ -1596,10 +1664,18 @@ def handle_stock_selection_collection(message, state, user):
         elif selection_type == "to_warehouse" and "t_warehouse" in remaining_fields:
             remaining_fields.remove("t_warehouse")
         
+        # CRITICAL: Update state with updated missing_fields and data
+        state["missing_fields"] = remaining_fields
+        state["data"] = data
+        # Clear selection_type and numbered_options since we've moved to the next field
+        state["selection_type"] = None
+        state["numbered_options"] = []
+        set_conversation_state(user, state)
+        
         # Debug: Log the doctype from state (data truncated to avoid char limit)
         try:
             data_summary = f"{len(data)} fields" if data else "no data"
-            frappe.log_error(f"Doctype: {current_doctype}, Data: {data_summary}, Selection: {selection_type}", "State Debug")
+            frappe.log_error(f"Doctype: {current_doctype}, Data: {data_summary}, Selection: {selection_type}, Remaining: {len(remaining_fields)}", "State Debug")
         except:
             pass
         
@@ -1735,7 +1811,28 @@ def handle_stock_selection_collection(message, state, user):
                 
                 if field_obj:
                     # Use smart field selection
-                    return get_smart_field_selection(next_field, field_obj, data, remaining_fields, user, current_doctype)
+                    # Preserve stage and optional_fields from current state
+                    current_stage = state.get("stage", "collecting_mandatory")
+                    current_optional_fields = state.get("optional_fields", [])
+                    # Update state with remaining_fields before calling get_smart_field_selection
+                    state["missing_fields"] = remaining_fields
+                    state["data"] = data
+                    state["stage"] = current_stage
+                    state["optional_fields"] = current_optional_fields
+                    # Clear selection_type so next field can be set properly
+                    state["selection_type"] = None
+                    set_conversation_state(user, state)
+                    # Get the response from smart field selection
+                    response = get_smart_field_selection(next_field, field_obj, data, remaining_fields, user, current_doctype)
+                    # Ensure state is preserved after get_smart_field_selection (it may have created new state)
+                    updated_state = get_conversation_state(user)
+                    if updated_state:
+                        updated_state["stage"] = current_stage
+                        updated_state["optional_fields"] = current_optional_fields
+                        updated_state["missing_fields"] = remaining_fields
+                        updated_state["data"] = data
+                        set_conversation_state(user, updated_state)
+                    return response
                 else:
                     # Fallback for fields not found in metadata
                     label_to_ask = next_field.replace("_", " ").title()
@@ -1750,7 +1847,40 @@ def handle_stock_selection_collection(message, state, user):
                     
                     return f"Great! Now, what should I set as the {label_to_ask}?"
         else:
-            # All fields collected - use current doctype already retrieved above
+            # All fields collected - check if we need to ask for confirmation
+            # Get stage from state to determine if we're collecting mandatory fields
+            stage = state.get("stage", "collecting_mandatory")
+            optional_fields = state.get("optional_fields", [])
+            
+            # If we're collecting mandatory fields and all are done, ask for confirmation
+            # Check if we have optional_fields (means we're collecting mandatory) or stage is collecting_mandatory
+            if (stage == "collecting_mandatory" or (stage not in ["collecting_optional", "asking_optional"] and optional_fields)):
+                # All mandatory fields collected - always ask if user wants to submit or fill optional fields
+                state["stage"] = "asking_optional"
+                set_conversation_state(user, state)
+                
+                if optional_fields:
+                    # Ask if user wants to fill optional fields
+                    response_parts = [
+                        "✅ **All mandatory fields completed!**\n",
+                        "**What would you like to do next?**",
+                        "",
+                        "• Type `fill more` or `yes` to add optional fields",
+                        "• Type `submit` or `create` to create the document now"
+                    ]
+                else:
+                    # No optional fields available, but still ask for confirmation
+                    response_parts = [
+                        "✅ **All mandatory fields completed!**\n",
+                        "**What would you like to do next?**",
+                        "",
+                        "• Type `submit` or `create` to create the document now",
+                        "• (No optional fields available)"
+                    ]
+                return "\n".join(response_parts)
+            
+            # All fields (including optional) collected, check for child tables
+            # Use current doctype already retrieved above
             # CRITICAL FIX: Only run detection logic if doctype is not set in state
             # If we already have a doctype from state, NEVER override it!
             if not current_doctype:
@@ -1833,13 +1963,18 @@ def handle_stock_selection_collection(message, state, user):
                 for child_table in required_child_tables:
                     if child_table not in data or not data[child_table]:
                         missing_child_tables.append(child_table)
+                # Keep title short, put details in message
                 frappe.log_error(f"Missing child tables calculation complete: {missing_child_tables}", "Child Table Missing")
             except Exception as e:
                 frappe.log_error(f"Error calculating missing child tables: {str(e)}", "Child Table Missing Error")
             
             # Debug: Log child table transition
             try:
-                frappe.log_error(f"Child check for {current_doctype}: required={required_child_tables}, missing={missing_child_tables}", "Final Child Check")
+                # Keep title short, put details in message
+                # frappe.log_error expects (title, message) and title has 140 char limit
+                title = "Final Child Check"
+                message = f"Child check for {current_doctype}: required={required_child_tables}, missing={missing_child_tables}"
+                frappe.log_error(title=title, message=message)
             except:
                     pass
             
@@ -1874,42 +2009,62 @@ def handle_stock_selection_collection(message, state, user):
 def get_intent_from_gemini(user_input, user):
     """Use Gemini to understand user intent and convert to structured data"""
     
+    # Debug: Print function entry
+    print(f"\n{'='*80}")
+    print(f"GET_INTENT_FROM_GEMINI - Function Entry")
+    print(f"{'='*80}")
+    print(f"User Input: {user_input}")
+    print(f"User: {user}")
+    print(f"GenAI Available: {genai is not None}")
+    print(f"{'='*80}\n")
+    
     # Check if Gemini is available
     if not genai:
+        print("ERROR: GenAI module not available")
         return {
             "reply": "Gemini AI is not available. Please install google-generativeai package."
         }
     
     # Get API key from site config
     api_key = frappe.conf.get("gemini_api_key")
+    print(f"API Key Found: {api_key is not None and len(api_key) > 0 if api_key else False}")
+    
     if not api_key:
+        print("ERROR: API key not configured")
         return {
             "reply": "I'm sorry, but the AI service is not configured properly. Please contact your administrator to set up the Gemini API key."
         }
     
     try:
+        print(f"Attempting to configure Gemini and generate content...")
         # Configure Gemini
         genai.configure(api_key=api_key)
         
         # Try different model names in order of preference
-        model_names = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'models/gemini-1.5-flash']
+        model_names = ['gemini-2.0-flash-lite']
         model = None
         
         for model_name in model_names:
             try:
+                print(f"Trying model: {model_name}")
                 model = genai.GenerativeModel(model_name)
+                print(f"✓ Successfully created model: {model_name}")
                 break
             except Exception as model_error:
+                print(f"✗ Failed to create model {model_name}: {str(model_error)}")
                 continue
                 
         if not model:
+            print("ERROR: Could not create any model")
             return {
                 "reply": "AI service is temporarily unavailable. Please try again later."
             }
 
         # Get available doctypes for the user
+        print(f"Getting available doctypes for user...")
         available_doctypes = get_user_accessible_doctypes()
         doctype_list = ", ".join(available_doctypes)
+        print(f"Found {len(available_doctypes)} accessible doctypes")
 
         # Enhanced prompt for better understanding
         prompt = f"""
@@ -1927,6 +2082,12 @@ Supported actions:
 - "get": Get specific document information
 - "update": Update existing document fields
 - "delete": Delete a document
+- "submit": Submit a document (make it official/approved)
+- "cancel": Cancel a submitted document
+- "amend": Create an amended version of a submitted document
+- "print": Print a document
+- "email": Email a document to recipients
+- "report": Generate or view a report
 - "assign": Assign/link documents or roles
 - "help": Provide help information
 
@@ -1983,6 +2144,12 @@ Examples:
 - "make biomass a group" -> {{"doctype": "Item Group", "action": "update", "filters": {{"name": "Biomass"}}, "data": {{"is_group": 1}}}}
 - "Change first name of user@example.com" -> {{"doctype": "User", "action": "update", "filters": {{"name": "user@example.com"}}, "field_to_update": "first_name"}}
 - "Delete sales order SO-001" -> {{"doctype": "Sales Order", "action": "delete", "filters": {{"name": "SO-001"}}}}
+- "Submit sales order SO-001" -> {{"doctype": "Sales Order", "action": "submit", "filters": {{"name": "SO-001"}}}}
+- "Cancel sales invoice SI-001" -> {{"doctype": "Sales Invoice", "action": "cancel", "filters": {{"name": "SI-001"}}}}
+- "Amend purchase order PO-001" -> {{"doctype": "Purchase Order", "action": "amend", "filters": {{"name": "PO-001"}}}}
+- "Print sales order SO-001" -> {{"doctype": "Sales Order", "action": "print", "filters": {{"name": "SO-001"}}}}
+- "Email sales order SO-001 to customer@example.com" -> {{"doctype": "Sales Order", "action": "email", "filters": {{"name": "SO-001"}}, "recipients": ["customer@example.com"]}}
+- "Show me the sales order report" -> {{"doctype": "Sales Order", "action": "report", "report_name": "Sales Order"}}
 - "Assign Sales User role to user@example.com" -> {{"doctype": "User", "action": "assign", "target": "user@example.com", "assign_type": "role", "value": "Sales User"}}
 - "Show all roles" -> {{"action": "list_roles"}}
 - "Help me with sales orders" -> {{"action": "help", "topic": "Sales Order"}}
@@ -2001,10 +2168,18 @@ Important:
 Respond with ONLY the JSON object, no additional text or formatting.
         """
 
+        print(f"Calling Gemini API to generate content...")
+        print(f"Prompt length: {len(prompt)} characters")
+        
         response = model.generate_content(prompt)
+        
+        print(f"✓ Received response from Gemini API")
+        print(f"Response type: {type(response)}")
         
         # Clean and parse the response
         clean_json_str = response.text.strip()
+        print(f"Response text length: {len(clean_json_str)} characters")
+        print(f"Response preview (first 200 chars): {clean_json_str[:200]}")
         
         # Remove markdown formatting if present
         if clean_json_str.startswith("```json"):
@@ -2013,17 +2188,68 @@ Respond with ONLY the JSON object, no additional text or formatting.
             clean_json_str = clean_json_str[:-3]
         clean_json_str = clean_json_str.strip()
         
-        return json.loads(clean_json_str)
+        print(f"Cleaned JSON string length: {len(clean_json_str)} characters")
+        print(f"Cleaned JSON preview: {clean_json_str[:200]}")
+        
+        parsed_json = json.loads(clean_json_str)
+        print(f"✓ Successfully parsed JSON response")
+        print(f"Parsed JSON keys: {list(parsed_json.keys()) if isinstance(parsed_json, dict) else 'Not a dict'}")
+        
+        return parsed_json
         
     except json.JSONDecodeError as e:
+        # Debug: Print error details to console
+        print(f"\n{'='*80}")
+        print(f"GEMINI JSON PARSE ERROR")
+        print(f"{'='*80}")
+        print(f"Error Type: JSONDecodeError")
+        print(f"Error Message: {str(e)}")
+        print(f"Error Details: {repr(e)}")
+        print(f"{'='*80}\n")
+        
         frappe.log_error(f"Gemini JSON Parse Error: {str(e)[:80]}...", "Nexchat JSON Parse Error")
         return {
             "reply": "I had trouble understanding your request. Could you please rephrase it more clearly?"
         }
     except Exception as e:
+        # Debug: Print error details to console
+        import traceback
+        print(f"\n{'='*80}")
+        print(f"GEMINI API ERROR - Exception Caught")
+        print(f"{'='*80}")
+        print(f"Error Type: {type(e).__name__}")
+        print(f"Error Message: {str(e)}")
+        print(f"Error Details: {repr(e)}")
+        print(f"\nFull Traceback:")
+        print(traceback.format_exc())
+        print(f"{'='*80}\n")
+        sys.stdout.flush()  # Force flush to ensure output is visible
+        
         # Log error with shortened title to avoid character limit issues
         error_msg = str(e)[:100] + "..." if len(str(e)) > 100 else str(e)
-        frappe.log_error(f"Gemini API Error: {error_msg}", "Nexchat Gemini API Error")
+        
+        # Debug: Print title and message before logging
+        title = "Nexchat Gemini API Error"
+        message = f"Gemini API Error: {error_msg}"
+        print(f"\n{'='*80}")
+        print(f"LOGGING ERROR - Title and Message Check")
+        print(f"{'='*80}")
+        print(f"Title: {title}")
+        print(f"Title Length: {len(title)} characters")
+        print(f"Message: {message}")
+        print(f"Message Length: {len(message)} characters")
+        print(f"{'='*80}\n")
+        sys.stdout.flush()  # Force flush
+        
+        # Wrap error logging in try-except to prevent silent failures
+        try:
+            frappe.log_error(title=title, message=message)
+            print("✓ Error logged successfully")
+        except Exception as log_error:
+            print(f"✗ Failed to log error: {str(log_error)}")
+            print(f"Log error traceback: {traceback.format_exc()}")
+        sys.stdout.flush()
+        
         return {
             "reply": "I'm having trouble processing your request right now. Please try again in a moment."
         }
@@ -2068,8 +2294,19 @@ def get_user_accessible_doctypes():
 def execute_task(task_json, user, user_input=""):
     """Execute the task based on the parsed JSON from Gemini"""
     
+    print(f"\n{'='*80}")
+    print(f"EXECUTE_TASK - Function Entry")
+    print(f"{'='*80}")
+    print(f"Task JSON received: {task_json}")
+    print(f"Task JSON type: {type(task_json)}")
+    print(f"User: {user}")
+    print(f"User Input: {user_input}")
+    print(f"{'='*80}\n")
+    
     action = task_json.get("action")
     doctype = task_json.get("doctype")
+    
+    print(f"Extracted - Action: {action}, Doctype: {doctype}")
     
     # Fix for common doctype name issues (spaces missing)
     doctype_mappings = {
@@ -2099,7 +2336,24 @@ def execute_task(task_json, user, user_input=""):
     try:
         json_summary = f"{len(task_json)} keys" if task_json else "empty"
         full_json = str(task_json)[:200] + "..." if len(str(task_json)) > 200 else str(task_json)
-        frappe.log_error(f"Gemini - Action: {action}, Doctype: {doctype}, JSON: {json_summary}, Full: {full_json}", "Gemini Debug")
+        # Keep title short (max 130 chars for safety), put details in message
+        # frappe.log_error expects (title, message) and title has 140 char limit
+        title = f"Gemini Debug: {action or 'None'}"
+        if len(title) > 130:
+            title = title[:127] + "..."
+        message = f"Action: {action}, Doctype: {doctype}, JSON: {json_summary}, Full: {full_json}"
+        
+        # Debug: Print title and message to console
+        print(f"\n{'='*80}")
+        print(f"GEMINI DEBUG LOG - Title and Message Check")
+        print(f"{'='*80}")
+        print(f"Title: {title}")
+        print(f"Title Length: {len(title)} characters")
+        print(f"Message: {message}")
+        print(f"Message Length: {len(message)} characters")
+        print(f"{'='*80}\n")
+        
+        frappe.log_error(title=title, message=message)
     except:
         pass
     
@@ -2113,6 +2367,11 @@ def execute_task(task_json, user, user_input=""):
     
     # Handle replies (when Gemini couldn't parse the request)
     if "reply" in task_json:
+        print(f"\n{'='*80}")
+        print(f"EXECUTE_TASK - Returning Reply from Gemini")
+        print(f"{'='*80}")
+        print(f"Reply content: {task_json['reply']}")
+        print(f"{'='*80}\n")
         return task_json["reply"]
     
     if not action or not doctype:
@@ -2125,30 +2384,11 @@ def execute_task(task_json, user, user_input=""):
         response_parts = [
             "🤔 **Request Unclear**",
             "*I need more specific information to help you*\n",
-            "**💡 What I can help with:**",
-            "• **Create documents:** `Create a new customer`, `Make a sales order`",
-            "• **List information:** `Show me all customers`, `List sales orders`",
-            "• **Get details:** `Get customer details for CUST-001`",
-            "• **Update records:** `Update customer CUST-001 set name to ABC Corp`",
-            "• **Assign roles:** `Assign Sales User role to user@company.com`",
-            "",
-            "**📝 Example commands:**",
-            "• `Create a new customer`",
-            "• `Show me my sales orders`",
-            "• `List all items`", 
-            "• `Update customer ABC-001`",
-            "• `Create a purchase order`",
-            "",
             "**🎯 Document types I work with:**",
             "• Customer, Supplier, Item, Employee",
             "• Sales Order, Purchase Order, Quotation",
             "• Sales Invoice, Purchase Invoice",
-            "• Stock Entry, Asset, Project, Task",
-            "",
-            "**💬 Try being more specific:**",
-            "• Include the action you want (create, show, update, delete)",
-            "• Mention the document type (customer, item, order, etc.)",
-            "• Add any specific details or names"
+            "• Stock Entry, Asset, Project, Task"
         ]
         return "\n".join(response_parts)
 
@@ -2185,6 +2425,34 @@ def execute_task(task_json, user, user_input=""):
             return f"❌ You don't have permission to delete {doctype} documents."
         return handle_delete_action(doctype, task_json)
     
+    elif action == "submit":
+        if not frappe.has_permission(doctype, "submit"):
+            return f"❌ You don't have permission to submit {doctype} documents."
+        return handle_submit_action(doctype, task_json)
+    
+    elif action == "cancel":
+        if not frappe.has_permission(doctype, "cancel"):
+            return f"❌ You don't have permission to cancel {doctype} documents."
+        return handle_cancel_action(doctype, task_json)
+    
+    elif action == "amend":
+        if not frappe.has_permission(doctype, "write"):
+            return f"❌ You don't have permission to amend {doctype} documents."
+        return handle_amend_action(doctype, task_json)
+    
+    elif action == "print":
+        if not frappe.has_permission(doctype, "print"):
+            return f"❌ You don't have permission to print {doctype} documents."
+        return handle_print_action(doctype, task_json)
+    
+    elif action == "email":
+        if not frappe.has_permission(doctype, "email"):
+            return f"❌ You don't have permission to email {doctype} documents."
+        return handle_email_action(doctype, task_json, user)
+    
+    elif action == "report":
+        return handle_report_action(doctype, task_json)
+    
     elif action == "assign":
         return handle_assign_action(doctype, task_json, user)
     
@@ -2192,7 +2460,7 @@ def execute_task(task_json, user, user_input=""):
         return handle_role_assignment(task_json, user)
     
     else:
-        return f"I understand you want to work with {doctype}. I can help you:\n• **Create** new {doctype}\n• **List/View** {doctype} documents\n• **Get** specific {doctype} details\n• **Update** {doctype} fields\n• **Delete** {doctype} documents\n• **Assign** roles or links\n\nWhat would you like to do?"
+        return f"I understand you want to work with {doctype}. I can help you:\n• **Create** new {doctype}\n• **List/View** {doctype} documents\n• **Get** specific {doctype} details\n• **Update** {doctype} fields\n• **Submit** {doctype} documents\n• **Cancel** submitted {doctype}\n• **Amend** {doctype} documents\n• **Print** {doctype} documents\n• **Email** {doctype} documents\n• **Generate Reports** for {doctype}\n• **Delete** {doctype} documents\n• **Assign** roles or links\n\nWhat would you like to do?"
 
 def handle_create_doctype_action(task_json, user, user_input=""):
     """Handle DocType creation requests"""
@@ -2412,7 +2680,7 @@ def handle_create_action(doctype, task_json, user):
         # CRITICAL FIX: Ensure doctype is properly preserved from the start
         # Get data first as it's needed for conditional field checks
         data = task_json.get("data", {})
-            
+        
         # Get required fields for the doctype
         meta = frappe.get_meta(doctype)
         required_fields = []
@@ -2549,35 +2817,118 @@ def handle_create_action(doctype, task_json, user):
             if doctype == "Stock Entry":
                 return show_stock_entry_type_selection(data, missing_fields, user)
             
+            # Get all fields (mandatory and optional) to show user first
+            all_fields = []
+            optional_fields_list = []
+            
+            for df in meta.fields:
+                # Skip hidden, read-only, and standard fields
+                if df.hidden or df.read_only or df.fieldname in ['name', 'owner', 'creation', 'modified', 'modified_by', 'docstatus']:
+                    continue
+                # Skip child table fields - handled separately
+                if df.fieldtype == "Table":
+                    continue
+                # Skip fields that already have values
+                if df.fieldname in data:
+                    continue
+                
+                field_info = {
+                    "fieldname": df.fieldname,
+                    "label": df.label or df.fieldname.replace("_", " ").title(),
+                    "fieldtype": df.fieldtype,
+                    "required": df.reqd and not df.default
+                }
+                
+                if field_info["required"] and df.fieldname in missing_fields:
+                    all_fields.append(field_info)
+                elif not field_info["required"]:
+                    optional_fields_list.append(field_info)
+            
+            # Check if this is the first time showing fields (no state exists)
+            existing_state = get_conversation_state(user)
+            if not existing_state or existing_state.get("action") != "collect_fields":
+                # First time - show all fields overview
+                response_parts = [
+                    f"📋 **Create {doctype}**\n",
+                    "**📝 All Fields:**\n"
+                ]
+                
+                # Show mandatory fields
+                if missing_fields:
+                    response_parts.append("**🔴 Mandatory Fields:**")
+                    for field_name in missing_fields:
+                        field_obj = meta.get_field(field_name)
+                        if field_obj:
+                            field_icon = get_field_icon(field_obj.fieldtype)
+                            response_parts.append(f"  {field_icon} **{field_obj.label or field_name.replace('_', ' ').title()}** ({field_obj.fieldtype})")
+                    response_parts.append("")
+                
+                # Show optional fields
+                if optional_fields_list:
+                    response_parts.append("**⚪ Optional Fields:**")
+                    for field_info in optional_fields_list[:10]:  # Show first 10 optional fields
+                        field_icon = get_field_icon(field_info["fieldtype"])
+                        response_parts.append(f"  {field_icon} {field_info['label']} ({field_info['fieldtype']})")
+                    if len(optional_fields_list) > 10:
+                        response_parts.append(f"  ... and {len(optional_fields_list) - 10} more optional fields")
+                    response_parts.append("")
+                
+                # Now start collecting mandatory fields
+                if missing_fields:
+                    response_parts.append("**🎯 Let's start by filling the mandatory fields:**\n")
+                    
+                    # Save state for field collection
+                    state = {
+                        "action": "collect_fields",
+                        "doctype": doctype,
+                        "data": data,
+                        "missing_fields": missing_fields,
+                        "optional_fields": [f["fieldname"] for f in optional_fields_list],
+                        "stage": "collecting_mandatory"
+                    }
+                    set_conversation_state(user, state)
+                    
+                    # Get first mandatory field and show its input
+                    field_to_ask = missing_fields[0]
+                    field_obj = meta.get_field(field_to_ask)
+                    
+                    # Use smart field selection for the first field
+                    if field_obj:
+                        field_selection_response = get_smart_field_selection(field_to_ask, field_obj, data, missing_fields, user, doctype)
+                        return "\n".join(response_parts) + "\n\n" + field_selection_response
+                    else:
+                        label_to_ask = field_to_ask.replace("_", " ").title()
+                        return "\n".join(response_parts) + f"\n\n**First mandatory field:** {label_to_ask}\n\nWhat should I set as the {label_to_ask}?"
+            
             # Handle regular fields first, then child tables
             if missing_fields:
-              field_to_ask = missing_fields[0]
-            
-            # Check if field exists in meta
-            try:
-                field_obj = meta.get_field(field_to_ask)
-            except Exception as field_error:
-                field_obj = None
-            
-            if field_obj:
-                # Use smart field selection for all doctypes - CRITICAL: Pass the original doctype
-                return get_smart_field_selection(field_to_ask, field_obj, data, missing_fields, user, doctype)
-            else:
-                # Fallback if field not found in metadata
-                label_to_ask = field_to_ask.replace("_", " ").title()
+                field_to_ask = missing_fields[0]
                 
-                # Save the current state with EXPLICIT doctype - CRITICAL FIX
-                state = {
-                    "action": "collect_stock_selection",  # Use stock_selection for consistency
-                    "selection_type": field_to_ask,
-                    "doctype": doctype,  # CRITICAL: Preserve original doctype explicitly
-                    "data": data,
-                    "missing_fields": missing_fields,
-                    "numbered_options": []
-                }
-                set_conversation_state(user, state)
+                # Check if field exists in meta
+                try:
+                    field_obj = meta.get_field(field_to_ask)
+                except Exception as field_error:
+                    field_obj = None
                 
-                return f"I can create a {doctype} for you! What should I set as the {label_to_ask}?"
+                if field_obj:
+                    # Use smart field selection for all doctypes - CRITICAL: Pass the original doctype
+                    return get_smart_field_selection(field_to_ask, field_obj, data, missing_fields, user, doctype)
+                else:
+                    # Fallback if field not found in metadata
+                    label_to_ask = field_to_ask.replace("_", " ").title()
+                    
+                    # Save the current state with EXPLICIT doctype - CRITICAL FIX
+                    state = {
+                        "action": "collect_stock_selection",  # Use stock_selection for consistency
+                        "selection_type": field_to_ask,
+                        "doctype": doctype,  # CRITICAL: Preserve original doctype explicitly
+                        "data": data,
+                        "missing_fields": missing_fields,
+                        "numbered_options": []
+                    }
+                    set_conversation_state(user, state)
+                    
+                    return f"I can create a {doctype} for you! What should I set as the {label_to_ask}?"
             
         elif missing_child_tables:
             # All regular fields collected, now collect child tables
@@ -2743,17 +3094,7 @@ def create_document(doctype, data, user):
             f"**🔍 What happened:**",
             f"• A {doctype.lower()} with these details already exists",
             f"• ERPNext prevents duplicate entries automatically",
-            f"• This helps maintain data integrity",
-            "",
-            f"**💡 What you can do:**",
-            f"• **Check existing:** Look in the {doctype} list for similar entries",
-            f"• **Modify details:** Try with different name or information",
-            f"• **Update existing:** Edit the existing {doctype.lower()} instead",
-            "",
-            f"**🔧 Suggestions:**",
-            f"• Use `List all {doctype.lower()}s` to see existing entries",
-            f"• Try a different name or identifier",
-            f"• Update the existing record if needed"
+            f"• This helps maintain data integrity"
         ]
         return "\n".join(response_parts)
     except frappe.ValidationError as e:
@@ -2763,18 +3104,7 @@ def create_document(doctype, data, user):
             f"❌ **{doctype} Validation Failed**",
             f"*The {doctype.lower()} data didn't pass validation checks*\n",
             f"**🚨 Validation Error:**",
-            f"• `{str(e)}`",
-            "",
-            f"**💡 Common solutions:**",
-            f"• **Check required fields:** Ensure all mandatory fields are filled",
-            f"• **Verify formats:** Dates, emails, numbers should be in correct format",
-            f"• **Review permissions:** Check if you can create this {doctype.lower()}",
-            f"• **Validate links:** Ensure linked documents exist",
-            "",
-            f"**🔧 Try again with:**",
-            f"• Corrected field values",
-            f"• All required information",
-            f"• Proper data formats"
+            f"• `{str(e)}`"
         ]
         return "\n".join(response_parts)
     except Exception as e:
@@ -2784,17 +3114,7 @@ def create_document(doctype, data, user):
             f"💥 **{doctype} Creation Error**",
             f"*An unexpected error occurred while creating your {doctype.lower()}*\n",
             f"**🚨 Error Details:**",
-            f"• `{str(e)}`",
-            "",
-            f"**💡 What to try:**",
-            f"• **Retry:** Try creating the {doctype.lower()} again",
-            f"• **Check data:** Verify all information is correct",
-            f"• **Contact admin:** If the error persists",
-            "",
-            f"**🔧 Troubleshooting:**",
-            f"• Check your permissions for {doctype}",
-            f"• Ensure all required fields are provided",
-            f"• Verify system connectivity"
+            f"• `{str(e)}`"
         ]
         return "\n".join(response_parts)
 
@@ -2822,15 +3142,6 @@ def handle_list_action(doctype, task_json):
                 f"• **Found:** 0 {doctype.lower()}s",
                 f"• **Filters:** {filters if filters else 'None applied'}",
                 "",
-                f"**💡 What you can do:**",
-                f"• **Create new:** `Create a new {doctype.lower()}`",
-                f"• **Remove filters:** Try without search criteria",
-                f"• **Check spelling:** Verify filter values are correct",
-                "",
-                f"**🚀 Quick Actions:**",
-                f"• Create your first {doctype.lower()}",
-                f"• Import {doctype.lower()}s from spreadsheet",
-                f"• Configure {doctype.lower()} settings"
             ]
             return "\n".join(response_parts)
         
@@ -2910,11 +3221,6 @@ def handle_get_action(doctype, task_json):
                 f"• **By name:** `Get {doctype.lower()} [document-name]`",
                 f"• **By ID:** `Get {doctype.lower()} [ID]`",
                 f"• **Specific field:** `Get [field] for {doctype.lower()} [name]`",
-                "",
-                f"**📝 Examples:**",
-                f"• `Get {doctype.lower()} CUST-001`",
-                f"• `Get customer_name for {doctype.lower()} CUST-001`",
-                f"• `Show {doctype.lower()} details for [name]`",
                 "",
                 f"**🎯 What I can show:**",
                 f"• All field values for the {doctype.lower()}",
@@ -3289,7 +3595,345 @@ def handle_delete_action(doctype, task_json):
             f"• Consider data backup procedures for future"
         ]
         return "\n".join(response_parts)
+    except frappe.PermissionError:
+        return f"❌ You don't have permission to delete this {doctype} document."
+    except Exception as e:
+        return f"❌ Error deleting {doctype}: {str(e)}"
         
+def handle_submit_action(doctype, task_json):
+    """Handle document submission"""
+    try:
+        filters = task_json.get("filters", {})
+        
+        if not filters:
+            return f"Please specify which {doctype} document you want to submit. For example: 'Submit sales order SO-001'"
+        
+        # Check if document exists
+        if not frappe.db.exists(doctype, filters):
+            return f"Could not find a {doctype} document matching your criteria."
+        
+        # Get the document
+        doc = frappe.get_doc(doctype, filters)
+        doc_name = doc.name
+        
+        # Check if already submitted
+        if hasattr(doc, 'docstatus') and doc.docstatus == 1:
+            return f"✅ {doctype} '{doc_name}' is already submitted."
+        
+        # Check if document is cancelled
+        if hasattr(doc, 'docstatus') and doc.docstatus == 2:
+            return f"❌ Cannot submit {doctype} '{doc_name}' because it is cancelled. Please create a new document or amend this one."
+        
+        # Submit the document
+        doc.submit()
+        frappe.db.commit()
+        
+        response_parts = [
+            f"✅ **{doctype} Submitted Successfully!**",
+            f"*{doctype} '{doc_name}' has been submitted and is now official*\n",
+            f"**📋 Submission Details:**",
+            f"• **Document:** {doc_name}",
+            f"• **Type:** {doctype}",
+            f"• **Status:** ✅ Submitted",
+            "",
+            f"**💡 What happened:**",
+            f"• The {doctype.lower()} has been officially submitted",
+            f"• It can no longer be edited directly",
+            f"• To make changes, you'll need to cancel or amend it",
+            "",
+            f"**🚀 What's next:**",
+            f"• **View:** Check the submitted {doctype.lower()} in ERPNext",
+            f"• **Cancel:** `Cancel {doctype.lower()} {doc_name}` (if needed)",
+            f"• **Amend:** `Amend {doctype.lower()} {doc_name}` (to create a new version)",
+            f"• **Print:** `Print {doctype.lower()} {doc_name}`",
+            f"• **Email:** `Email {doctype.lower()} {doc_name}`"
+        ]
+        return "\n".join(response_parts)
+        
+    except frappe.ValidationError as e:
+        return f"❌ Cannot submit {doctype}: {str(e)}"
+    except frappe.PermissionError:
+        return f"❌ You don't have permission to submit this {doctype} document."
+    except Exception as e:
+        return f"❌ Error submitting {doctype}: {str(e)}"
+
+def handle_cancel_action(doctype, task_json):
+    """Handle document cancellation"""
+    try:
+        filters = task_json.get("filters", {})
+        
+        if not filters:
+            return f"Please specify which {doctype} document you want to cancel. For example: 'Cancel sales order SO-001'"
+        
+        # Check if document exists
+        if not frappe.db.exists(doctype, filters):
+            return f"Could not find a {doctype} document matching your criteria."
+        
+        # Get the document
+        doc = frappe.get_doc(doctype, filters)
+        doc_name = doc.name
+        
+        # Check if already cancelled
+        if hasattr(doc, 'docstatus') and doc.docstatus == 2:
+            return f"✅ {doctype} '{doc_name}' is already cancelled."
+        
+        # Check if not submitted
+        if hasattr(doc, 'docstatus') and doc.docstatus == 0:
+            return f"❌ Cannot cancel {doctype} '{doc_name}' because it is not submitted. Only submitted documents can be cancelled."
+        
+        # Cancel the document
+        doc.cancel()
+        frappe.db.commit()
+        
+        response_parts = [
+            f"🚫 **{doctype} Cancelled Successfully!**",
+            f"*{doctype} '{doc_name}' has been cancelled*\n",
+            f"**📋 Cancellation Details:**",
+            f"• **Document:** {doc_name}",
+            f"• **Type:** {doctype}",
+            f"• **Status:** 🚫 Cancelled",
+            "",
+            f"**💡 What happened:**",
+            f"• The {doctype.lower()} has been cancelled",
+            f"• It is no longer active or valid",
+            f"• You can create a new document or amend the original",
+            "",
+            f"**🚀 What's next:**",
+            f"• **Amend:** `Amend {doctype.lower()} {doc_name}` (to create a new version)",
+            f"• **Create new:** `Create a new {doctype.lower()}`",
+            f"• **View:** Check the cancelled {doctype.lower()} in ERPNext"
+        ]
+        return "\n".join(response_parts)
+        
+    except frappe.LinkExistsError as e:
+        return f"❌ Cannot cancel {doctype} '{doc_name}': {str(e)}. There are linked documents that must be handled first."
+    except frappe.ValidationError as e:
+        return f"❌ Cannot cancel {doctype}: {str(e)}"
+    except frappe.PermissionError:
+        return f"❌ You don't have permission to cancel this {doctype} document."
+    except Exception as e:
+        return f"❌ Error cancelling {doctype}: {str(e)}"
+
+def handle_amend_action(doctype, task_json):
+    """Handle document amendment"""
+    try:
+        filters = task_json.get("filters", {})
+        
+        if not filters:
+            return f"Please specify which {doctype} document you want to amend. For example: 'Amend sales order SO-001'"
+        
+        # Check if document exists
+        if not frappe.db.exists(doctype, filters):
+            return f"Could not find a {doctype} document matching your criteria."
+        
+        # Get the document
+        doc = frappe.get_doc(doctype, filters)
+        doc_name = doc.name
+        
+        # Check if document is submitted (required for amendment)
+        if hasattr(doc, 'docstatus') and doc.docstatus != 1:
+            return f"❌ Cannot amend {doctype} '{doc_name}' because it is not submitted. Only submitted documents can be amended."
+        
+        # Create amended document
+        amended_doc = doc.make_amended_copy()
+        amended_doc.save()
+        frappe.db.commit()
+        
+        response_parts = [
+            f"📝 **{doctype} Amendment Created!**",
+            f"*A new amended version of '{doc_name}' has been created*\n",
+            f"**📋 Amendment Details:**",
+            f"• **Original Document:** {doc_name}",
+            f"• **Amended Document:** {amended_doc.name}",
+            f"• **Type:** {doctype}",
+            f"• **Status:** ✅ Draft (ready for editing)",
+            "",
+            f"**💡 What happened:**",
+            f"• A new amended version '{amended_doc.name}' has been created",
+            f"• The original '{doc_name}' remains unchanged",
+            f"• You can now edit the amended document",
+            "",
+            f"**🚀 What's next:**",
+            f"• **Edit:** Make changes to the amended {doctype.lower()}",
+            f"• **Update:** `Update {doctype.lower()} {amended_doc.name}`",
+            f"• **Submit:** `Submit {doctype.lower()} {amended_doc.name}` (after editing)",
+            f"• **View:** Check the amended {doctype.lower()} in ERPNext"
+        ]
+        return "\n".join(response_parts)
+        
+    except frappe.ValidationError as e:
+        return f"❌ Cannot amend {doctype}: {str(e)}"
+    except frappe.PermissionError:
+        return f"❌ You don't have permission to amend this {doctype} document."
+    except Exception as e:
+        return f"❌ Error amending {doctype}: {str(e)}"
+
+def handle_print_action(doctype, task_json):
+    """Handle document printing"""
+    try:
+        filters = task_json.get("filters", {})
+        
+        if not filters:
+            return f"Please specify which {doctype} document you want to print. For example: 'Print sales order SO-001'"
+        
+        # Check if document exists
+        if not frappe.db.exists(doctype, filters):
+            return f"Could not find a {doctype} document matching your criteria."
+        
+        doc = frappe.get_doc(doctype, filters)
+        doc_name = doc.name
+        
+        # Generate print URL
+        print_format = task_json.get("print_format", "Standard")
+        print_url = f"/api/method/frappe.printing.doctype.print_format.print_format.download_pdf?doctype={doctype}&name={doc_name}&format={print_format}"
+        
+        response_parts = [
+            f"🖨️ **{doctype} Print Ready!**",
+            f"*Print format generated for '{doc_name}'*\n",
+            f"**📋 Print Details:**",
+            f"• **Document:** {doc_name}",
+            f"• **Type:** {doctype}",
+            f"• **Format:** {print_format}",
+            "",
+            f"**💡 Print Options:**",
+            f"• Click the print button in ERPNext to view/download PDF",
+            f"• Use browser print (Ctrl+P / Cmd+P) for direct printing",
+            f"• Save as PDF for digital records",
+            "",
+            f"**🔗 Quick Actions:**",
+            f"• **View:** Open the document in ERPNext",
+            f"• **Email:** `Email {doctype.lower()} {doc_name}`",
+            f"• **Get details:** `Get {doctype.lower()} {doc_name}`"
+        ]
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"❌ Error preparing print for {doctype}: {str(e)}"
+
+def handle_email_action(doctype, task_json, user):
+    """Handle document emailing"""
+    try:
+        filters = task_json.get("filters", {})
+        
+        if not filters:
+            return f"Please specify which {doctype} document you want to email. For example: 'Email sales order SO-001 to customer@example.com'"
+        
+        # Check if document exists
+        if not frappe.db.exists(doctype, filters):
+            return f"Could not find a {doctype} document matching your criteria."
+        
+        doc = frappe.get_doc(doctype, filters)
+        doc_name = doc.name
+        
+        # Get recipients from task_json or use default
+        recipients = task_json.get("recipients", [])
+        if isinstance(recipients, str):
+            recipients = [recipients]
+        
+        if not recipients:
+            # Try to get email from document
+            if hasattr(doc, 'contact_email'):
+                recipients = [doc.contact_email]
+            elif hasattr(doc, 'email_id'):
+                recipients = [doc.email_id]
+            else:
+                return f"Please specify email recipients. For example: 'Email {doctype.lower()} {doc_name} to customer@example.com'"
+        
+        # Get email subject and message
+        subject = task_json.get("subject", f"{doctype} - {doc_name}")
+        message = task_json.get("message", f"Please find attached {doctype.lower()} {doc_name}.")
+        
+        # Send email (using Frappe's email functionality)
+        frappe.sendmail(
+            recipients=recipients,
+            subject=subject,
+            message=message,
+            reference_doctype=doctype,
+            reference_name=doc_name,
+            print_letterhead=True
+        )
+        frappe.db.commit()
+        
+        response_parts = [
+            f"📧 **{doctype} Emailed Successfully!**",
+            f"*{doctype} '{doc_name}' has been sent to recipients*\n",
+            f"**📋 Email Details:**",
+            f"• **Document:** {doc_name}",
+            f"• **Type:** {doctype}",
+            f"• **Recipients:** {', '.join(recipients)}",
+            f"• **Subject:** {subject}",
+            "",
+            f"**💡 What happened:**",
+            f"• The {doctype.lower()} has been emailed to all recipients",
+            f"• Email includes document as PDF attachment",
+            f"• Recipients will receive the email shortly",
+            "",
+            f"**🚀 What's next:**",
+            f"• **Print:** `Print {doctype.lower()} {doc_name}`",
+            f"• **View:** Check the document in ERPNext",
+            f"• **Email again:** Send to additional recipients if needed"
+        ]
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"❌ Error emailing {doctype}: {str(e)}"
+
+def handle_report_action(doctype, task_json):
+    """Handle report generation"""
+    try:
+        report_name = task_json.get("report_name", "")
+        filters = task_json.get("filters", {})
+        
+        if not report_name and doctype:
+            # Try to find a report for this doctype
+            reports = frappe.get_all("Report", 
+                                    filters={"ref_doctype": doctype},
+                                    fields=["name"],
+                                    limit=1)
+            if reports:
+                report_name = reports[0].name
+            else:
+                return f"Please specify a report name. For example: 'Show me the Sales Order report' or 'Generate Customer report'"
+        
+        if not report_name:
+            return f"Please specify which report you want to view. Available reports can be found in ERPNext Reports section."
+        
+        # Check if report exists
+        if not frappe.db.exists("Report", report_name):
+            return f"Report '{report_name}' not found. Please check the report name and try again."
+        
+        # Get report data
+        report_doc = frappe.get_doc("Report", report_name)
+        
+        response_parts = [
+            f"📊 **Report: {report_name}**",
+            f"*Report information and access*\n",
+            f"**📋 Report Details:**",
+            f"• **Report Name:** {report_name}",
+            f"• **Document Type:** {report_doc.ref_doctype or 'N/A'}",
+            f"• **Type:** {report_doc.report_type or 'N/A'}",
+            "",
+            f"**💡 Access Report:**",
+            f"• Open the report in ERPNext to view data",
+            f"• Apply filters as needed",
+            f"• Export data if required",
+            "",
+            f"**🚀 Quick Actions:**",
+            f"• **View in ERPNext:** Navigate to Reports section",
+            f"• **Filter:** Apply specific filters in the report",
+            f"• **Export:** Download as Excel or PDF"
+        ]
+        
+        if filters:
+            response_parts.append(f"\n**🔍 Applied Filters:**")
+            for key, value in filters.items():
+                response_parts.append(f"• {key}: {value}")
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        return f"❌ Error accessing report: {str(e)}"
+
     except frappe.LinkExistsError:
         return f"Cannot delete this {doctype} because it is linked to other documents. Please remove the links first."
     except frappe.PermissionError:
@@ -3444,17 +4088,6 @@ def show_role_selection_interface(target_user, available_roles, current_user):
         response_parts = [
             f"🎯 **Select Role(s) for {target_user}**\n",
             "\n".join(role_sections),
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `5`) for single role",
-            "• Type **multiple numbers** with commas (e.g., `1,3,7`) for multiple roles",
-            "• Type the **role name** directly",
-            "• Type `all roles` or `*` to assign **ALL** available roles",
-            "• Type `all` to see full list with descriptions",
-            "• Type `cancel` to cancel\n",
-            f"📝 **Examples:**",
-            f"• `1,5,8` → Assign specific roles",
-            f"• `all roles` or `*` → Assign ALL {len(numbered_roles)} roles",
-            f"• `Sales User` → Assign by name"
         ]
         
         return "\n".join(response_parts)
@@ -3764,7 +4397,6 @@ def handle_list_roles_request():
             response_parts.append("\n".join([f"• {role}" for role in sorted(other_roles)]))
             response_parts.append("")
         
-        response_parts.append("💡 **Usage:** `assign [role_name] role to [user@email.com]`")
         
         return "\n".join(response_parts)
         
@@ -3901,16 +4533,6 @@ def show_stock_entry_type_selection(data, missing_fields, user):
             response_parts.append("")
         
         response_parts.extend([
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `2`) for your choice",
-            "• Type the **operation name** directly",
-            "• Type `cancel` to cancel operation",
-            "",
-            "**📝 Quick Examples:**",
-            "• `2` → Select Material Receipt",
-            "• `Material Transfer` → Direct selection",
-            "• `cancel` → Cancel this operation",
-            "",
             "**ℹ️ Operation Categories:**",
             "• **📥 Inbound:** Receive materials into warehouse",
             "• **📤 Outbound:** Issue materials from warehouse",
@@ -3920,7 +4542,6 @@ def show_stock_entry_type_selection(data, missing_fields, user):
             f"**🎯 Stock Entry Selection:**",
             f"• **Total Operations:** {len(stock_entry_types)} available",
             f"• **Categories:** 4 operation types",
-            f"• **Usage:** Essential for inventory management",
             f"• **Impact:** Updates stock levels automatically"
         ])
         
@@ -3987,20 +4608,9 @@ You can:
         
         response_parts.extend([
             "",
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `2`) for your choice",
-            "• Type the **company name** directly",
-            "• Type `cancel` to cancel operation",
-            "",
-            "**📝 Quick Examples:**",
-            f"• `1` → Select **{companies[0].name}**" if companies else "",
-            f"• `{companies[0].name}` → Select by name" if companies else "",
-            "• `cancel` → Cancel this operation",
-            "",
             f"**🎯 Company Selection:**",
             f"• **Total Companies:** {len(companies)} available",
             f"• **Field Type:** Company Link",
-            f"• **Usage:** This company will be used for all transactions",
             f"• **Status:** Required for document creation"
         ])
         
@@ -4083,10 +4693,6 @@ def show_warehouse_selection(field_name, data, missing_fields, user):
 
 **ℹ️ No Warehouses Available**
 
-**💡 What you can do:**
-• Type a **warehouse name** directly
-• Type `cancel` to cancel operation
-• Contact administrator to configure warehouses
 
 **🔧 Field Information:**
 • **Field:** {field_label}
@@ -4115,21 +4721,10 @@ def show_warehouse_selection(field_name, data, missing_fields, user):
         
         response_parts.extend([
             "",
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `3`) for your choice",
-            "• Type the **warehouse name** directly",
-            "• Type `cancel` to cancel operation",
-            "",
-            "**📝 Quick Examples:**",
-            f"• `1` → Select **{warehouses[0].name}**" if warehouses else "",
-            f"• `{warehouses[0].name}` → Select by exact name" if warehouses else "",
-            "• `cancel` → Cancel this operation",
-            "",
             f"**🎯 Warehouse Selection Details:**",
             f"• **Field:** {field_label}",
             f"• **Type:** Warehouse Link",
-            f"• **Available:** {len(warehouses)} warehouses",
-            f"• **Usage:** For stock operations and inventory management"
+            f"• **Available:** {len(warehouses)} warehouses"
         ])
         
         response_text = "\n".join([part for part in response_parts if part])
@@ -4188,16 +4783,6 @@ def show_asset_item_selection(data, missing_fields, user):
             
             response_parts.extend([
                 "",
-                "**💡 How to select:**",
-                "• Type a **number** (e.g., `3`) for your choice",
-                "• Type the **item code** directly",
-                "• Type `cancel` to cancel operation",
-                "",
-                "**📝 Quick Examples:**",
-                f"• `1` → Select **{items[0].item_code}**" if items else "",
-                f"• `{items[0].item_code}` → Select by exact code" if items else "",
-                "• `cancel` → Cancel this operation",
-                "",
                 f"**🎯 Asset Item Selection Details:**",
                 f"• **Field:** Item Code (Asset)",
                 f"• **Type:** Item Link",
@@ -4208,10 +4793,6 @@ def show_asset_item_selection(data, missing_fields, user):
             response_parts.extend([
                 "**ℹ️ No Asset Items Available**",
                 "",
-                "**💡 What you can do:**",
-                "• Type an **item code** directly",
-                "• Type `cancel` to cancel operation",
-                "• Create asset items in Item master first",
                 "",
                 "**🔧 Item Information:**",
                 "• **Field:** Item Code",
@@ -4270,18 +4851,6 @@ def show_location_selection(data, missing_fields, user):
             
             response_parts.extend([
                 "",
-                "**💡 How to select:**",
-                "• Type a **number** (e.g., `3`) for your choice",
-                "• Type the **location name** directly",
-                "• Type `new location name` to create it",
-                "• Type `cancel` to cancel operation",
-                "",
-                "**📝 Quick Examples:**",
-                f"• `1` → Select **{locations[0].name}**" if locations else "",
-                f"• `{locations[0].name}` → Select by exact name" if locations else "",
-                "• `Main Office` → Create new location",
-                "• `cancel` → Cancel this operation",
-                "",
                 f"**🎯 Asset Location Details:**",
                 f"• **Field:** Location",
                 f"• **Type:** Location Link",
@@ -4292,10 +4861,6 @@ def show_location_selection(data, missing_fields, user):
             response_parts.extend([
                 "**ℹ️ No Locations Available**",
                 "",
-                "**💡 What you can do:**",
-                "• Type a **location name** to create it",
-                "• Type `cancel` to cancel operation",
-                "• Example: `Main Office`, `Warehouse 1`, `Factory Floor`",
                 "",
                 "**🔧 Location Information:**",
                 "• **Field:** Location",
@@ -4377,30 +4942,15 @@ def show_asset_field_selection(field_name, data, missing_fields, user):
             
             response_parts.extend([
                 "",
-                "**💡 How to select:**",
-                "• Type a **number** (e.g., `3`) for your choice",
-                "• Type the **name** directly",
-                "• Type `cancel` to cancel operation",
-                "",
-                "**📝 Quick Examples:**",
-                f"• `1` → Select **{field_data[0].name}**" if field_data else "",
-                f"• `{field_data[0].name}` → Select by exact name" if field_data else "",
-                "• `cancel` → Cancel this operation",
-                "",
                 f"**🎯 {field_label} Selection Details:**",
                 f"• **Field:** {field_label}",
                 f"• **Type:** Link Field",
-                f"• **Available:** {len(field_data)} {field_label.lower()}s",
-                f"• **Usage:** Required for asset management"
+                f"• **Available:** {len(field_data)} {field_label.lower()}s"
             ])
         else:
             response_parts.extend([
                 f"**ℹ️ No {field_label}s Available**",
                 "",
-                "**💡 What you can do:**",
-                "• Type a **name** directly",
-                "• Type `cancel` to cancel operation",
-                f"• Create {field_label.lower()}s in master data first",
                 "",
                 f"**🔧 {field_label} Information:**",
                 f"• **Field:** {field_label}",
@@ -4436,43 +4986,11 @@ def show_asset_purchase_amount_selection(data, missing_fields, user):
             "*Input the cost at which the asset was purchased*\n"
         ]
         
-        # Add beautiful examples section
         response_parts.extend([
-            "**📝 Amount Examples:**",
-            "• `50000` → ₹50,000 (Standard format)",
-            "• `25000.50` → ₹25,000.50 (With decimals)",
-            "• `100000` → ₹100,000 (Large amount)",
-            ""
-        ])
-        
-        response_parts.extend([
-            "**💰 Asset Purchase Amount Guidelines:**",
-            "• **Whole amounts:** `50000`, `100000`, `250000`",
-            "• **Decimal amounts:** `25000.50`, `99999.99`",
-            "• **Large amounts:** `1000000` (1 million), `5000000`",
-            "• **Zero amount:** `0` if no purchase cost",
-            "",
-            "**✅ Valid Format Examples:**",
-            "• `50000` → Fifty thousand rupees",
-            "• `25000.50` → Twenty-five thousand and fifty paise",
-            "• `1000000` → Ten lakh rupees",
-            "",
-            "**❌ Invalid Formats:**",
-            "• ~~`₹50000`~~ (No currency symbol needed)",
-            "• ~~`50,000`~~ (No commas allowed)",
-            "• ~~`50k`~~ (No abbreviations)",
-            "",
-            "**💡 How to enter:**",
-            "• Type the **amount as a number** directly",
-            "• Use **decimal point** for paise (e.g., `25000.50`)",
-            "• Type `0` if **no purchase cost** or unknown",
-            "• Type `cancel` to cancel operation",
-            "",
             "**🎯 Asset Amount Details:**",
             "• **Field:** Gross Purchase Amount",
             "• **Type:** Currency Amount",
-            "• **Format:** Decimal number (no symbols)",
-            "• **Usage:** Used for depreciation calculations"
+            "• **Format:** Decimal number (no symbols)"
         ])
         
         response_text = "\n".join([part for part in response_parts if part])
@@ -4572,21 +5090,10 @@ You can:
         
         response_parts.extend([
             "",
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `3`) for your choice",
-            "• Type the **{} name** directly".format(link_doctype.lower()),
-            "• Type `cancel` to cancel operation",
-            "",
-            "**📝 Quick Examples:**",
-            f"• `1` → Select **{records[0].name}**" if records else "",
-            f"• `{records[0].name}` → Select by exact name" if records else "",
-            "• `cancel` → Cancel this operation",
-            "",
             f"**🎯 {link_doctype} Selection Details:**",
             f"• **Field:** {field_label}",
             f"• **Type:** {link_doctype} Link",
-            f"• **Available:** {len(records)} {link_doctype.lower()}s",
-            f"• **Search:** Type any name for direct selection"
+            f"• **Available:** {len(records)} {link_doctype.lower()}s"
         ])
         
         response_text = "\n".join([part for part in response_parts if part])
@@ -4692,14 +5199,6 @@ You can:
                     f"**🔄 Page Navigation:** {' | '.join(nav_info)}"
                 ])
         
-        response_parts.extend([
-            "",
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `3`) from the list above",
-            f"• Type the **{link_doctype.lower()} name** directly",
-            "• Type `cancel` to cancel operation"
-        ])
-        
         if total_pages > 1:
             response_parts.extend([
                 "",
@@ -4710,17 +5209,11 @@ You can:
         
         response_parts.extend([
             "",
-            "**📝 Quick Examples:**",
-            f"• `1` → Select first {link_doctype.lower()} from current page",
-            f"• `{current_page_records[0].name}` → Direct selection by name" if current_page_records else "",
-            "• `cancel` → Cancel this operation",
-            "",
             f"**🎯 {link_doctype} Selection Details:**",
             f"• **Field:** {field_label}",
             f"• **Current Page:** {page} of {total_pages}",
             f"• **Total Available:** {total_items} {link_doctype.lower()}s",
-            f"• **Per Page:** {items_per_page} items",
-            f"• **Search:** Type any name for instant match"
+            f"• **Per Page:** {items_per_page} items"
         ])
         
         response_text = "\n".join([part for part in response_parts if part])
@@ -4748,7 +5241,7 @@ You can:
         return f"Error showing {field_label} selection: {str(e)}"
 
 def show_generic_select_selection(field_name, field_label, options, data, missing_fields, user, current_doctype):
-    """Show beautiful selection for any Select field with heavy markdown styling"""
+    """Show interactive selection for any Select field"""
     try:
         # Parse options (they come as newline-separated string)
         option_list = [opt.strip() for opt in options.split('\n') if opt.strip()]
@@ -4762,51 +5255,17 @@ def show_generic_select_selection(field_name, field_label, options, data, missin
 
 **ℹ️ No Options Available**
 
-**💡 What you can do:**
-• Type `cancel` to cancel this operation
-• Contact your **administrator** to configure field options
-• Check if this field should have predefined values
 
 **🔧 Field Information:**
 • **Field:** {field_label}
 • **Type:** Select (Dropdown)
 • **Status:** No options configured"""
         
-        # Unicode circled numbers for beautiful badges (purple theme)
-        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+        # Convert to format with value and label
+        options_with_labels = [{"value": opt, "label": opt} for opt in option_list]
         
-        # Create beautiful response with sections
-        response_parts = [
-            f"📝 **Select {field_label}**",
-            f"*Choose from {len(option_list)} available options*\n"
-        ]
-        
-        # Add the beautiful option cards with circled numbers
-        response_parts.append("**⚙️ Available Options:**")
-        for i, option in enumerate(option_list, 1):
-            badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
-            response_parts.append(f"{badge} **{option}**")
-        
-        response_parts.extend([
-            "",
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `3`) for your choice",
-            "• Type the **option name** directly",
-            "• Type `cancel` to cancel operation",
-            "",
-            "**📝 Quick Examples:**",
-            f"• `1` → Select **{option_list[0]}**" if option_list else "",
-            f"• `{option_list[0]}` → Select by name" if option_list else "",
-            "• `cancel` → Cancel this operation",
-            "",
-            f"**🎯 Field Details:**",
-            f"• **Field:** {field_label}",
-            f"• **Options:** {len(option_list)} available",
-            f"• **Type:** Select (Dropdown)",
-            f"• **Required:** {'Yes' if field_name in missing_fields else 'Optional'}"
-        ])
-        
-        response_text = "\n".join([part for part in response_parts if part])  # Remove empty parts
+        # Create interactive HTML
+        html_response = create_interactive_selection_html("select", field_label, options_with_labels, field_name, "📝")
         
         # Save state
         state = {
@@ -4819,7 +5278,7 @@ def show_generic_select_selection(field_name, field_label, options, data, missin
         }
         set_conversation_state(user, state)
         
-        return response_text
+        return html_response
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
@@ -4836,52 +5295,6 @@ def show_generic_currency_selection(field_name, field_label, data, missing_field
             f"*Input a currency amount for your {field_label.lower()}*\n"
         ]
         
-        # Add beautiful examples section
-        response_parts.extend([
-            "**📝 Amount Examples:**",
-            f"• `{examples[0]}` → ₹{examples[0]} (Perfect format)",
-            f"• `{examples[1]}` → ₹{examples[1]} (With decimals)",
-            f"• `{examples[2]}` → ₹{examples[2]} (Small amount)",
-            ""
-        ])
-        
-        response_parts.extend([
-            "**💰 Currency Amount Guidelines:**",
-            "• **Whole amounts:** `1000`, `50000`, `100000`",
-            "• **Decimal amounts:** `1000.50`, `25000.75`, `99.99`",
-            "• **Large amounts:** `1000000` (1 million), `5000000` (5 million)",
-            "• **Zero amount:** `0` if no value required",
-            "",
-            "**✅ Valid Format Examples:**",
-            "• `50000` → Fifty thousand",
-            "• `25000.50` → Twenty-five thousand and fifty cents",
-            "• `100.99` → One hundred and ninety-nine cents",
-            "• `1000000` → One million",
-            "",
-            "**❌ Invalid Formats:**",
-            "• ~~`₹50000`~~ (No currency symbol needed)",
-            "• ~~`50,000`~~ (No commas allowed)",
-            "• ~~`50k`~~ (No abbreviations)",
-            "",
-            "**💡 How to enter:**",
-            "• Type the **amount as a number** directly",
-            "• Use **decimal point** for cents (e.g., `25000.50`)",
-            "• Type `0` if **no amount** or zero value",
-            "• Type `cancel` to cancel operation",
-            "",
-            "**🚀 Pro Tips:**",
-            "• **Precision:** Use up to 2 decimal places for cents",
-            "• **Large amounts:** System handles millions/billions",
-            "• **Auto-conversion:** System converts to proper currency format",
-            "• **Validation:** Invalid amounts will be rejected with guidance",
-            "",
-            f"**🎯 Amount Input Details:**",
-            f"• **Field:** {field_label}",
-            f"• **Type:** Currency Amount (Number)",
-            f"• **Format:** Decimal number (no symbols)",
-            f"• **Range:** 0 to 999,999,999,999.99",
-            f"• **Status:** Required monetary input"
-        ])
         
         response_text = "\n".join([part for part in response_parts if part])
         
@@ -4980,15 +5393,6 @@ def show_currency_link_selection(field_name, field_label, data, missing_fields, 
                     f"**🔄 Page Navigation:** {' | '.join(nav_info)}"
                 ])
         
-        response_parts.extend([
-            "",
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `3`) from the options above",
-            "• Type the **currency code** directly (e.g., `USD`, `INR`)",
-            "• Type a **popular currency** from the ⭐ section",
-            "• Type `cancel` to cancel operation"
-        ])
-        
         if total_pages > 1:
             response_parts.extend([
                 "",
@@ -4999,17 +5403,10 @@ def show_currency_link_selection(field_name, field_label, data, missing_fields, 
         
         response_parts.extend([
             "",
-            "**📝 Quick Examples:**",
-            "• `1` → Select first currency from list",
-            "• `USD` → US Dollar (direct search)",
-            "• `INR` → Indian Rupee (direct search)",
-            "• `EUR` → Euro (direct search)",
-            "",
             f"**🎯 Currency Selection Details:**",
             f"• **Field:** {field_label}",
             f"• **Current Page:** {page} of {total_pages}",
-            f"• **Total Available:** {total_items} currencies",
-            f"• **Search:** Type any currency code for instant match"
+            f"• **Total Available:** {total_items} currencies"
         ])
         
         response_text = "\n".join(response_parts)
@@ -5061,54 +5458,6 @@ def show_generic_numeric_selection(field_name, field_label, fieldtype, data, mis
             f"*Input a {description} for this field*\n"
         ]
         
-        # Add beautiful examples section
-        response_parts.extend([
-            "**📝 Input Examples:**",
-            f"• `{examples[0]}` → Perfect format",
-            f"• `{examples[1]}` → Another example", 
-            f"• `{examples[2]}` → Large number format",
-            ""
-        ])
-        
-        # Add detailed instructions
-        if fieldtype == "Int":
-            response_parts.extend([
-                "**🔢 Integer Number Guidelines:**",
-                "• **Whole numbers only:** `100`, `2500`, `10000`",
-                "• **No decimals allowed:** ❌ `100.5` ✅ `100`",
-                "• **Positive numbers preferred:** `1` to `999999999`",
-                "• **Zero allowed:** `0` for no value"
-            ])
-        elif fieldtype == "Percent":
-            response_parts.extend([
-                "**📊 Percentage Guidelines:**",
-                "• **Range:** `0` to `100` percent",
-                "• **Decimals allowed:** `15.5`, `25.75`, `100.00`",
-                "• **Whole percentages:** `15`, `50`, `100`",
-                "• **Common values:** `10`, `15`, `18`, `25`"
-            ])
-        else:  # Float
-            response_parts.extend([
-                "**💯 Decimal Number Guidelines:**",
-                "• **Decimal format:** `100.50`, `25.75`, `1000.99`",
-                "• **Whole numbers:** `100`, `250`, `1000`",
-                "• **Scientific notation:** `1e3` (equals 1000)",
-                "• **High precision:** `123.456789`"
-            ])
-        
-        response_parts.extend([
-            "",
-            "**💡 How to enter:**",
-            f"• Type a {description} directly",
-            "• Type `0` if no value or zero amount",
-            "• Type `cancel` to cancel operation",
-            "",
-            f"**🎯 Field Information:**",
-            f"• **Field:** {field_label}",
-            f"• **Type:** {fieldtype} (Number)",
-            f"• **Format:** {description.title()}",
-            f"• **Status:** Required input"
-        ])
         
         response_text = "\n".join([part for part in response_parts if part])
         
@@ -5129,8 +5478,106 @@ def show_generic_numeric_selection(field_name, field_label, fieldtype, data, mis
     except Exception as e:
         return f"Error showing {field_label} input: {str(e)}"
 
+def create_interactive_selection_html(selection_type, field_label, options_list, field_name=None, icon="⚙️"):
+    """Create interactive HTML for any selection type (Select, Link, Date, etc.)"""
+    import html
+    circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩", "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"]
+    
+    buttons_html = ""
+    for i, option in enumerate(options_list[:20], 1):  # Limit to 20 options
+        badge = circled_numbers[i-1] if i <= len(circled_numbers) else f"({i})"
+        option_value = option if isinstance(option, str) else option.get('value', str(option))
+        option_label = option if isinstance(option, str) else option.get('label', str(option))
+        
+        # Escape the value for HTML attributes - replace quotes with HTML entities
+        option_value_str = str(option_value)
+        # Replace single and double quotes with HTML entities
+        escaped_value = option_value_str.replace('"', '&quot;').replace("'", '&#39;')
+        escaped_label = html.escape(str(option_label), quote=False)
+        
+        buttons_html += f"""
+        <button class="nexchat-option-button" data-number="{i}" data-value="{escaped_value}">
+            <span class="option-badge">{badge}</span>
+            <span class="option-label">{escaped_label}</span>
+        </button>
+        """
+    
+    html_response = f"""
+<div class="nexchat-interactive-selection">
+    <div class="nexchat-selection-header">
+        <strong>{icon} Select {field_label}</strong>
+        <p style="margin: 8px 0; color: #666; font-size: 14px;">Choose from {len(options_list)} available options</p>
+    </div>
+    <div class="nexchat-selection-options">
+        {buttons_html}
+    </div>
+</div>
+<style>
+.nexchat-interactive-selection {{
+    padding: 12px;
+    margin: 8px 0;
+}}
+.nexchat-selection-header {{
+    margin-bottom: 12px;
+}}
+.nexchat-selection-options {{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}}
+.nexchat-option-button {{
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+    width: 100%;
+    font-family: inherit;
+}}
+.nexchat-option-button:hover {{
+    background: #e9ecef;
+    border-color: #6c757d;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}}
+.nexchat-option-button:active {{
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}}
+.nexchat-option-button.selected {{
+    background: #d4edda;
+    border-color: #28a745;
+    box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
+}}
+.option-badge {{
+    font-size: 18px;
+    margin-right: 12px;
+    color: #6c757d;
+    min-width: 24px;
+}}
+.nexchat-option-button.selected .option-badge {{
+    color: #28a745;
+}}
+.option-label {{
+    font-size: 15px;
+    color: #212529;
+    flex: 1;
+}}
+.nexchat-option-button.selected .option-label {{
+    color: #155724;
+    font-weight: 600;
+}}
+</style>
+"""
+    return html_response
+
 def show_generic_date_selection(field_name, field_label, data, missing_fields, user, current_doctype):
-    """Show simple date selection interface"""
+    """Show interactive date selection interface with clickable buttons"""
     try:
         from datetime import date, timedelta
         
@@ -5146,52 +5593,23 @@ def show_generic_date_selection(field_name, field_label, data, missing_fields, u
             month_later.strftime("%Y-%m-%d")
         ]
         
-        # Get current year for examples
-        current_year = today.year
-        
-        # Unicode circled numbers for beautiful badges (purple theme)
-        circled_numbers = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
-        
-        # Create beautiful response with heavy markdown styling
-        response_parts = [
-            f"📅 **Select {field_label}**",
-            f"*Choose a date for your {field_label.lower()}*\n"
+        # Create date options with labels
+        date_options_with_labels = [
+            {"value": today.strftime("%Y-%m-%d"), "label": f"Today - {today.strftime('%Y-%m-%d')} ({today.strftime('%A')})"},
+            {"value": tomorrow.strftime("%Y-%m-%d"), "label": f"Tomorrow - {tomorrow.strftime('%Y-%m-%d')} ({tomorrow.strftime('%A')})"},
+            {"value": week_later.strftime("%Y-%m-%d"), "label": f"Next Week - {week_later.strftime('%Y-%m-%d')} ({week_later.strftime('%A')})"},
+            {"value": month_later.strftime("%Y-%m-%d"), "label": f"Next Month - {month_later.strftime('%Y-%m-%d')} ({month_later.strftime('%A')})"}
         ]
         
-        # Add beautiful quick date options with circled numbers
-        response_parts.extend([
-            "**⚡ Quick Date Options:**",
-            f"{circled_numbers[0]} **Today** - `{today.strftime('%Y-%m-%d')}` ({today.strftime('%A')})",
-            f"{circled_numbers[1]} **Tomorrow** - `{tomorrow.strftime('%Y-%m-%d')}` ({tomorrow.strftime('%A')})",
-            f"{circled_numbers[2]} **Next Week** - `{week_later.strftime('%Y-%m-%d')}` ({week_later.strftime('%A')})",
-            f"{circled_numbers[3]} **Next Month** - `{month_later.strftime('%Y-%m-%d')}` ({month_later.strftime('%A')})",
-            ""
-        ])
+        # Create interactive HTML
+        html_response = create_interactive_selection_html("date", field_label, date_options_with_labels, field_name, "📅")
         
-        response_parts.extend([
-            "**💡 How to select:**",
-            "• Type a **number** (e.g., `2`) for quick date options",
-            "• Type a **custom date** in `YYYY-MM-DD` format",
-            "• Type `cancel` to cancel operation",
-            "",
-            "**📝 Custom Date Examples:**",
-            f"• `{current_year}-12-25` → Christmas {current_year}",
-            f"• `{current_year+1}-06-15` → Mid-year {current_year+1}",
-            f"• `{current_year+1}-03-01` → March 1st {current_year+1}",
-            "",
-            "**📋 Date Format Guidelines:**",
-            "• **Required format:** `YYYY-MM-DD` (4-digit year)",
-            "• **Valid examples:** `2024-12-31`, `2025-01-15`",
-            "• **Invalid examples:** ❌ `31/12/2024` ❌ `Dec 31 2024`",
-            "",
-            f"**🎯 Date Selection Details:**",
-            f"• **Field:** {field_label}",
-            f"• **Today's Date:** {today.strftime('%Y-%m-%d')} ({today.strftime('%A')})",
-            f"• **Format Required:** YYYY-MM-DD",
-            f"• **Quick Options:** 4 available above"
-        ])
-        
-        response_text = "\n".join([part for part in response_parts if part])
+        # Add custom date input note
+        html_response += """
+    <div class="nexchat-date-custom">
+        <p style="margin: 12px 0 8px 0; color: #666; font-size: 13px;">Or type a custom date (YYYY-MM-DD format):</p>
+    </div>
+"""
         
         # Save state
         state = {
@@ -5205,7 +5623,7 @@ def show_generic_date_selection(field_name, field_label, data, missing_fields, u
         }
         set_conversation_state(user, state)
         
-        return response_text
+        return html_response
         
     except Exception as e:
         return f"Error showing {field_label} selection: {str(e)}"
@@ -5258,77 +5676,7 @@ def show_generic_text_input(field_name, field_label, data, missing_fields, user,
             f"*Input text for your {field_label.lower()}*\n"
         ]
         
-        # Add beautiful examples section
-        response_parts.extend([
-            "**📝 Input Examples:**",
-            f"• `{examples[0]}` → Perfect format",
-            f"• `{examples[1] if len(examples) > 1 else examples[0]}` → Alternative example",
-            ""
-        ])
         
-        # Add specific guidelines based on field type
-        if "email" in field_name.lower():
-            response_parts.extend([
-                "**📧 Email Guidelines:**",
-                "• **Format:** `username@domain.com`",
-                "• **Valid examples:** `john@company.com`, `admin@website.org`",
-                "• **Required parts:** Username + @ + Domain",
-                "• **Case:** Usually lowercase preferred"
-            ])
-        elif "phone" in field_name.lower() or "mobile" in field_name.lower():
-            response_parts.extend([
-                "**📱 Phone Guidelines:**",
-                "• **With country code:** `+91 9876543210`",
-                "• **Without code:** `9876543210`",
-                "• **Format options:** Numbers with/without spaces",
-                "• **Length:** Usually 10+ digits"
-            ])
-        elif "name" in field_name.lower():
-            response_parts.extend([
-                "**👤 Name Guidelines:**",
-                "• **Person names:** `John Doe`, `Mary Johnson`",
-                "• **Company names:** `ABC Corporation`, `XYZ Ltd`",
-                "• **Format:** Proper capitalization preferred",
-                "• **Length:** 2-100 characters typical"
-            ])
-        elif "address" in field_name.lower():
-            response_parts.extend([
-                "**📍 Address Guidelines:**",
-                "• **Complete format:** `Street, City, State, Country`",
-                "• **Example:** `123 Main St, New York, NY, USA`",
-                "• **Include:** Building/Street + City + State/Region",
-                "• **Postal code:** Include if available"
-            ])
-        elif "website" in field_name.lower():
-            response_parts.extend([
-                "**🌐 Website Guidelines:**",
-                "• **Full URL:** `https://www.company.com`",
-                "• **Simple format:** `www.company.com`",
-                "• **Protocol:** http:// or https:// preferred",
-                "• **Valid domains:** .com, .org, .net, etc."
-            ])
-        else:
-            response_parts.extend([
-                "**✏️ Text Input Guidelines:**",
-                "• **Free form text:** Type any relevant text",
-                "• **Length:** Keep reasonable length",
-                "• **Special chars:** Most characters allowed",
-                "• **Format:** No specific format required"
-            ])
-        
-        response_parts.extend([
-            "",
-            "**💡 How to enter:**",
-            "• Type your text **directly** in the chat",
-            "• Press **Enter** to submit your input",
-            "• Type `cancel` to cancel operation",
-            "",
-            f"**🎯 Field Information:**",
-            f"• **Field:** {field_label}",
-            f"• **Type:** Text Input",
-            f"• **Icon:** {icon}",
-            f"• **Status:** Required text input"
-        ])
         
         response_text = "\n".join([part for part in response_parts if part])
         
